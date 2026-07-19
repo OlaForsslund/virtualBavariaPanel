@@ -70,7 +70,7 @@ mechanism.
   `0x18B`.
 - Both `0x18B` and `0x20B` are streamed periodically on the real bus. While
   active, the gateway likewise streams `0x18C` continuously (at the panel's
-  cadence), alternating the heartbeat toggle bit (byte 0, bit 0) on every
+  cadence), alternating the alive-toggle bit (byte 0, bit 0) on every
   frame — the board treats a source with a static toggle bit as dead and
   ignores its commands.
 - The change is **volatile**: a power cycle of the relay board reverts
@@ -80,11 +80,6 @@ mechanism.
   watchdog or automatic revert is implemented.
 - On graceful shutdown/deactivation, the gateway writes `1400:1` back to
   `0x18B` itself.
-- Optional hardening: the panel OD shows the producer-heartbeat time
-  (`1017`) is writable; if the board matches (same firmware stack), the
-  gateway can enable a periodic board heartbeat during activation as a
-  cleaner liveness watchdog. Like the repoint it would be volatile. To be
-  verified on the real board.
 - **Relay reboot detection:** if the relay board power-cycles while the
   gateway is active, control silently reverts to `0x18B`. Since `0x20B`
   resumes after the reboot (echoing the panel again), a silence gap alone

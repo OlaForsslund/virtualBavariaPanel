@@ -28,7 +28,7 @@ Per-object panel sweep: `panel_od_map.md`.
 
 | Byte | Bits | Meaning | Confirmed |
 |------|------|---------|-----------|
-| 0 | bit 0 | **heartbeat toggle** — *must alternate* each frame or the board ignores the command | ✅ |
+| 0 | bit 0 | **alive toggle** — *must alternate* each frame or the board ignores the command (not to be confused with CANopen NMT heartbeat, which is off — `1017` = 0) | ✅ |
 | 0 | bits 1–7 | relay bitmap (low 7 bits) | ✅ |
 | 1 | all | relay bitmap (mid 8 bits) | ✅ |
 | 2 | all | relay bitmap (high 8 bits) | ✅ |
@@ -37,7 +37,7 @@ Per-object panel sweep: `panel_od_map.md`.
 24-bit bitmap; bit 0 is the toggle, so **23 usable circuit bits**. Byte 3 is dead space.
 
 ### Relay map
-    HEARTBEAT       = 0x00000001
+    ALIVE_TOGGLE    = 0x00000001
     ANCHOR          = 0x00000002
     BILGE_PUMP      = 0x00000004
     LANTERN_BOW     = 0x00000008
@@ -96,7 +96,7 @@ mirror images. **Identical mapping** on both — the difference is firmware role
 ## Key behavioural findings
 
 - **Board obeys `18B` and drives relays** — confirmed. It only accepts a command whose
-  **byte-0 heartbeat bit alternates**; a static frame is treated as a dead source and ignored.
+  **byte-0 alive-toggle bit alternates**; a static frame is treated as a dead source and ignored.
 - **Panel is a state _source only_** — confirmed. Its `0x4000` is RO and its `0x4001` inbox is
   never folded into state. A real, toggling `20B` carrying a *mismatched* state is **silently
   ignored** (no adopt, no EMCY). Only physical buttons change panel state. No bus path, flag

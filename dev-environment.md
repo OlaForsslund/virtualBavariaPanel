@@ -89,7 +89,10 @@ All steps run inside WSL2:
 
 - Use VS Code Remote-SSH to open the repo directly on the Pi (Ubuntu or
   Venus OS).
-- Swap config to `socketcan` / real channel.
+- Bring up the interface:
+  `sudo ip link set can0 up type can bitrate 250000 restart-ms 1000 berr-reporting on fd off`
+- Swap config to `socketcan` / real channel (`VBP_CAN_INTERFACE=socketcan`,
+  `VBP_CAN_CHANNEL=can0`).
 - Run the gateway against the real panel and/or relay board in place of
   the simulators — no code changes required.
 

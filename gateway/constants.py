@@ -24,7 +24,7 @@ RPDO1_COB_ID_SUB = 1
 
 EMCY_CAN_ERROR_PASSIVE = 0x8120  # benign burst at startup
 
-# Relay-state frame: 4 bytes little-endian; bit 0 is the heartbeat toggle
+# Relay-state frame: 4 bytes little-endian; bit 0 is the alive toggle
 # that must alternate every frame, bits 1..23 are circuits, byte 3 unused.
 TOGGLE_MASK = 0x00000001
 BITMAP_MASK = 0x00FFFFFE
