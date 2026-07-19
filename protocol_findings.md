@@ -1,6 +1,7 @@
 # Bavaria Panel CAN Protocol
 
 The bus is **CANopen (CiA 301) at 250 kbit/s**. `COB-ID = (function code << 7) | node id`.
+Per-object panel sweep: `panel_od_map.md`.
 
 ## Nodes
 
