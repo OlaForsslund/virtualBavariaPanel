@@ -1,0 +1,6 @@
+python-can
+canopen
+fastapi
+uvicorn[standard]
+pyyaml
+pytest
