@@ -85,7 +85,7 @@ mirror images. **Identical mapping** on both — the difference is firmware role
 
 | Object | Panel | Board | Note |
 |--------|-------|-------|------|
-| `1400:1` RPDO COB-ID | writable | **writable — repoint takes effect live** ✅ | the repoint lever |
+| `1400:1` RPDO COB-ID | writable | **writable** ✅ — same-value write live; *changing* the id needs the invalid-bit disable dance | the repoint lever |
 | `1400:2` RPDO txtype | writable | — | `0xFF` async |
 | `1800:1` TPDO COB-ID | writable | rejects in-place (`0x06090030`) | needs disable-dance |
 | `1600` / `1A00` mapping | **locked RO** | (assumed locked) | cannot remap |
@@ -104,6 +104,11 @@ mirror images. **Identical mapping** on both — the difference is firmware role
 - **Board vs panel = same firmware, opposite role:** the board copies its RPDO inbox
   (`0x4001`) into its state (`0x4000` + relays); the panel does not. This role — not the
   mapping — is why the board follows and the panel leads.
+- **Command interruption drops relays** — with the board's RPDO disabled for
+  ~150 ms mid-repoint, the board switched **all relays off** until commands
+  resumed (observed 2026-07-19); a <10 ms disabled window causes no glitch.
+  Exact supervision timeout unmeasured — keep any RPDO reconfiguration
+  window minimal, with no delays between the SDO writes.
 - **The repoint approach** — the board's RPDO can be repointed from `0x18B`
   to a Pi COB-ID **live over SDO** (disable → set → enable). The board then
   obeys the Pi and ignores the panel's `0x18B`. The change is **volatile**

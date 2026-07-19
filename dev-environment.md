@@ -15,11 +15,14 @@
 
 ```
 /gateway
-  main.py
-  /panel_interface
-  /relay_interface
-  /web_interface
-  /state_machine
+  main.py             <- entry point
+  constants.py        <- bus constants (from protocol findings)
+  frames.py           <- relay-state frame encode/decode
+  monitor.py          <- passive bus decoder
+  state_machine.py    <- gateway state machine (pure logic, architecture.md §6)
+  runtime.py          <- main loop wiring state machine to the bus; Streamer
+  sdo_probe.py        <- read-only SDO hardware probe
+  takeover_experiment.py
   /config
 
 /webapp
@@ -29,8 +32,12 @@
   relay_sim.py
   /eds              <- shared object dictionaries (gateway + simulators)
 
+/tests
 requirements.txt
 ```
+
+Components start as flat modules; a module becomes a package directory
+only when it actually grows multiple files (web_interface likely will).
 
 ## 3. Config Strategy
 

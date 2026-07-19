@@ -67,7 +67,10 @@ mechanism.
   own TPDO COB-ID `0x18C`, live over SDO, using the confirmed
   disable → set → enable sequence (`0x8000018B` → `0x8000018C` →
   `0x0000018C`). The board then obeys `0x18C` and ignores the panel's
-  `0x18B`.
+  `0x18B`. The three writes must run back-to-back: an RPDO-disabled window
+  of ~150 ms drops all relays until commands resume, <10 ms does not (see
+  `protocol_findings.md`). The gateway must already be streaming the
+  adopted state on `0x18C` before the sequence starts.
 - Both `0x18B` and `0x20B` are streamed periodically on the real bus. While
   active, the gateway likewise streams `0x18C` continuously (at the panel's
   cadence), alternating the alive-toggle bit (byte 0, bit 0) on every
