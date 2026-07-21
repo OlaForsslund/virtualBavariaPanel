@@ -1,4 +1,5 @@
 python-can
+msgpack  # required by python-can's udp_multicast backend (local sim bus)
 canopen
 fastapi
 uvicorn[standard]

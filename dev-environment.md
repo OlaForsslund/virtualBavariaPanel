@@ -2,9 +2,10 @@
 
 ## 1. Toolchain
 
-- **OS:** Windows host; the local dev loop runs inside **WSL2 (Ubuntu)**,
-  because python-can's `udp_multicast` backend is not supported on native
-  Windows. Git Bash on the host for general shell/git operations.
+- **OS:** Windows host; the repo and the whole dev loop live inside
+  **WSL2 (Ubuntu)** at `~/code/virtualBavariaPanel` — python-can's
+  `udp_multicast` backend is not supported on native Windows, and the
+  Linux filesystem is much faster than `/mnt/c`. Venv at `~/venvs/vbp`.
 - **Editor:** VS Code, with Python, WSL, and Remote-SSH extensions
 - **Language:** Python 3.11+
 - **Key packages:** `python-can`, `canopen`, `fastapi`, `uvicorn[standard]`,
