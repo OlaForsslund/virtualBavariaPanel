@@ -83,15 +83,20 @@ only when it actually grows multiple files (web_interface likely will).
 
 ## 5. Local Dev Loop
 
-All steps run inside WSL2:
+Open a terminal, `cd` into the repo, and run `./run_venv.sh` to activate the
+venv — do this in every terminal below before its command.
 
-1. Run `relay_sim.py` (virtual bus) — acts as relay board node.
-2. Run `panel_sim.py` (virtual bus) — acts as control panel node.
-3. Run `gateway/main.py` (virtual bus) — mediates between the two, serves
-   the web interface.
-4. Drive the web app or trigger panel_sim button presses; confirm state changes
-   propagate correctly — including the arbitration cases (web overrides
-   panel, panel toggle overrides web; see `architecture.md` §5).
+- **Terminal 1 — relay board:** `python -m simulators.relay_sim`
+- **Terminal 2 — control panel:** `python -m simulators.panel_sim`
+  (type a relay name + Enter to simulate a button press)
+- **Terminal 3 — gateway:** `python -m gateway.main --activate`
+  (drop `--activate` for passive/observe-only)
+- **Terminal 4 — bus traffic (optional):** `can_viewer -i udp_multicast -c 239.74.163.2`
+  — python-can's built-in live viewer, not a custom tool
+
+Then drive the web app or trigger panel_sim button presses; confirm state
+changes propagate correctly — including the arbitration cases (web overrides
+panel, panel toggle overrides web; see `architecture.md` §5).
 
 ## 6. Hardware Validation Loop
 

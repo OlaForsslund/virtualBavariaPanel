@@ -1,0 +1,54 @@
+{
+    "version": "0.2.0",
+    "configurations": [
+        {
+            "name": "Relay Sim (node 21)",
+            "type": "debugpy",
+            "request": "launch",
+            "module": "simulators.relay_sim",
+            "cwd": "${workspaceFolder}",
+            "python": "${workspaceFolder}/.venv/bin/python",
+            "console": "integratedTerminal",
+            "justMyCode": true
+        },
+        {
+            "name": "Panel Sim (node 11)",
+            "type": "debugpy",
+            "request": "launch",
+            "module": "simulators.panel_sim",
+            "cwd": "${workspaceFolder}",
+            "python": "${workspaceFolder}/.venv/bin/python",
+            "console": "integratedTerminal",
+            "justMyCode": true
+        },
+        {
+            "name": "Gateway (passive)",
+            "type": "debugpy",
+            "request": "launch",
+            "module": "gateway.main",
+            "cwd": "${workspaceFolder}",
+            "python": "${workspaceFolder}/.venv/bin/python",
+            "console": "integratedTerminal",
+            "justMyCode": true
+        },
+        {
+            "name": "Gateway (--activate)",
+            "type": "debugpy",
+            "request": "launch",
+            "module": "gateway.main",
+            "args": ["--activate"],
+            "cwd": "${workspaceFolder}",
+            "python": "${workspaceFolder}/.venv/bin/python",
+            "console": "integratedTerminal",
+            "justMyCode": true
+        }
+    ],
+    "compounds": [
+        {
+            "name": "Full sim bus (relay + panel + gateway --activate)",
+            "configurations": ["Gateway (--activate)"],
+            "preLaunchTask": "Start Sim Bus",
+            "stopAll": true
+        }
+    ]
+}

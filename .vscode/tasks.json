@@ -1,0 +1,49 @@
+{
+    "version": "2.0.0",
+    "tasks": [
+        {
+            "label": "Relay Sim",
+            "type": "shell",
+            "command": "${workspaceFolder}/.venv/bin/python -m simulators.relay_sim",
+            "isBackground": true,
+            "presentation": {
+                "reveal": "always",
+                "panel": "dedicated",
+                "focus": false
+            },
+            "problemMatcher": {
+                "pattern": { "regexp": "^never_match_anything$" },
+                "background": {
+                    "activeOnStart": true,
+                    "beginsPattern": "^.*$",
+                    "endsPattern": "^.*$"
+                }
+            }
+        },
+        {
+            "label": "Panel Sim",
+            "type": "shell",
+            "command": "${workspaceFolder}/.venv/bin/python -m simulators.panel_sim",
+            "isBackground": true,
+            "presentation": {
+                "reveal": "always",
+                "panel": "dedicated",
+                "focus": false
+            },
+            "problemMatcher": {
+                "pattern": { "regexp": "^never_match_anything$" },
+                "background": {
+                    "activeOnStart": true,
+                    "beginsPattern": "^.*$",
+                    "endsPattern": "^.*$"
+                }
+            }
+        },
+        {
+            "label": "Start Sim Bus",
+            "dependsOn": ["Relay Sim", "Panel Sim"],
+            "dependsOrder": "parallel",
+            "problemMatcher": []
+        }
+    ]
+}
