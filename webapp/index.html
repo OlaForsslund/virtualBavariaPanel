@@ -1,0 +1,80 @@
+<!DOCTYPE html>
+<html lang="en">
+<script>
+  if ('serviceWorker' in navigator) {
+    navigator.serviceWorker.register('/sw.js')
+      .then(() => console.log('Service Worker registered'))
+      .catch(err => console.error('Service Worker failed', err));
+  }
+</script>
+<head>
+  <link rel="manifest" href="/manifest.json">
+  <meta charset="UTF-8">
+  <title>Virtual Bavaria Panel</title>
+  <style>
+    body { font-family: sans-serif; margin: 20px; background-color: #f0f8ff; }
+    button {
+      display: block;
+      width: 100%;
+      max-width: 320px;
+      font-size: 1.2em;
+      padding: 10px 16px;
+      margin: 6px 0;
+      border: none;
+      border-radius: 8px;
+      cursor: pointer;
+      color: white;
+    }
+  </style>
+</head>
+<body>
+  <h1>Virtual Bavaria Panel</h1>
+  <p id="state">state: loading&hellip;</p>
+  <div id="circuits">loading&hellip;</div>
+
+  <script>
+    const POLL_MS = 500;
+    const ON_COLOR = '#0077cc';
+    const OFF_COLOR = '#888888';
+
+    async function setCircuit(name, on) {
+      await fetch(`/circuits/${name}`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ on }),
+      });
+    }
+
+    function render(status) {
+      document.getElementById('state').textContent =
+        `state: ${status.state} | streaming: ${status.streaming}`;
+
+      const container = document.getElementById('circuits');
+      container.innerHTML = '';
+      for (const [name, on] of Object.entries(status.circuits)) {
+        const btn = document.createElement('button');
+        btn.textContent = `${name}: ${on ? 'ON' : 'OFF'}`;
+        btn.style.backgroundColor = on ? ON_COLOR : OFF_COLOR;
+        btn.onclick = () => setCircuit(name, !on);
+        container.appendChild(btn);
+      }
+    }
+
+    async function poll() {
+      try {
+        const resp = await fetch('/status');
+        if (resp.ok) {
+          render(await resp.json());
+        } else {
+          document.getElementById('state').textContent = `state: error ${resp.status}`;
+        }
+      } catch (err) {
+        document.getElementById('state').textContent = 'state: unreachable';
+      }
+      setTimeout(poll, POLL_MS);
+    }
+
+    poll();
+  </script>
+</body>
+</html>

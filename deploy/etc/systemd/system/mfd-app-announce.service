@@ -1,0 +1,13 @@
+[Unit]
+Description=Broadcast this webapp as a B&G/Navico MFD app
+After=network-online.target lighttpd.service
+Wants=network-online.target
+
+[Service]
+ExecStart=/usr/bin/python3 /usr/local/bin/mfd-app-announce.py
+Restart=always
+RestartSec=5
+User=root
+
+[Install]
+WantedBy=multi-user.target

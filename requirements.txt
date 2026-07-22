@@ -5,3 +5,4 @@ fastapi
 uvicorn[standard]
 pyyaml
 pytest
+httpx  # needed by fastapi.testclient.TestClient
