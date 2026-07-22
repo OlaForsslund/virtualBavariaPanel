@@ -21,7 +21,7 @@ from gateway import constants
 from gateway.config import Config
 from gateway.frames import decode_state, encode_state
 from gateway.monitor import BusMonitor
-from gateway.state_machine import Action, GatewayStateMachine, State
+from gateway.state_machine import PASSIVE, DEACTIVATING, Action, GatewayStateMachine
 
 log = logging.getLogger("gateway")
 
@@ -116,7 +116,7 @@ class GatewayRuntime:
     def shutdown(self) -> None:
         self._shutdown.set()
         self.deactivate()
-        if self.sm.state not in (State.PASSIVE, State.DEACTIVATING):
+        if self.sm.state not in (PASSIVE, DEACTIVATING):
             # e.g. interrupted mid-ACTIVATING: hand back regardless.
             log.warning("shutdown in state %s — best-effort release", state.name)
             self._release()
@@ -138,7 +138,7 @@ class GatewayRuntime:
         return []
 
     def _execute(self, actions: list[Action]) -> None:
-        self._publish()
+        self._publish_to_streamer()
         for action in actions:
             if action is Action.REPOINT:
                 # Publish before the SDO sequence: the stream must already
@@ -151,9 +151,9 @@ class GatewayRuntime:
             elif action is Action.RELEASE:
                 self._release()
                 self.sm.release_done(time.monotonic())
-            self._publish()
+            self._publish_to_streamer()
 
-    def _publish(self) -> None:
+    def _publish_to_streamer(self) -> None:
         """Snapshot the state machine's output for the Streamer (atomic)."""
         self.stream_buffer.bitmap = self.sm.output_bitmap if self.sm.streaming else None
         self._log_state()
