@@ -78,12 +78,18 @@
 </head>
 <body>
   <nav>
-    <button data-view="control" class="active">Control</button>
+    <button data-view="essentials" class="active">Essentials</button>
+    <button data-view="control">All Controls</button>
     <button data-view="diagnostics">Diagnostics</button>
     <button data-view="config">Config</button>
   </nav>
 
-  <section id="view-control" class="view active">
+  <section id="view-essentials" class="view active">
+    <p id="essentials-state">state: loading&hellip;</p>
+    <div id="essentials-circuits">loading&hellip;</div>
+  </section>
+
+  <section id="view-control" class="view">
     <p id="state">state: loading&hellip;</p>
     <div id="circuits">loading&hellip;</div>
   </section>
@@ -109,7 +115,7 @@
   </section>
 
   <script>
-    // -- nav: one document, three views toggled via location.hash --
+    // -- nav: one document, four views toggled via location.hash --
     function showView(name) {
       document.querySelectorAll('.view').forEach(el => el.classList.remove('active'));
       document.querySelectorAll('nav button').forEach(el => el.classList.remove('active'));
@@ -120,9 +126,9 @@
       btn.addEventListener('click', () => { location.hash = btn.dataset.view; });
     });
     window.addEventListener('hashchange', () => {
-      showView(location.hash.slice(1) || 'control');
+      showView(location.hash.slice(1) || 'essentials');
     });
-    showView(location.hash.slice(1) || 'control');
+    showView(location.hash.slice(1) || 'essentials');
 
     // -- config: which circuits are visible on Control, persisted in localStorage --
     const VISIBLE_KEY = 'vbp.visibleCircuits';
@@ -183,13 +189,40 @@
       });
     }
 
-    // Control's #state line only shows when there's something to flag —
-    // otherwise it's just the circuit buttons. Diagnostics always shows
-    // full status, since that's the point of that tab.
-    function setStateLine(text) {
-      const el = document.getElementById('state');
+    // Control's/Essentials' #state lines only show when there's something
+    // to flag — otherwise it's just the circuit buttons. Diagnostics
+    // always shows full status, since that's the point of that tab.
+    function setStateLine(elId, text) {
+      const el = document.getElementById(elId);
       el.textContent = text;
       el.style.display = text ? '' : 'none';
+    }
+
+    async function setLanterns(on) {
+      await Promise.all([setCircuit('LANTERN_BOW', on), setCircuit('LANTERN_AFT', on)]);
+    }
+
+    function makeCircuitButton(label, on, onClick) {
+      const btn = document.createElement('button');
+      btn.className = on ? 'circuit on' : 'circuit';
+      btn.textContent = `${label}: ${on ? 'ON' : 'OFF'}`;
+      btn.onclick = onClick;
+      return btn;
+    }
+
+    // Essentials: a small curated/relabeled subset, not tied to Config's
+    // per-circuit visibility (that only governs the All Controls tab).
+    function renderEssentials(status) {
+      const c = status.circuits;
+      const container = document.getElementById('essentials-circuits');
+      container.innerHTML = '';
+
+      const lanternsOn = c.LANTERN_BOW && c.LANTERN_AFT;
+      container.appendChild(makeCircuitButton('Lanterns', lanternsOn, () => setLanterns(!lanternsOn)));
+      container.appendChild(makeCircuitButton('Anchor light', c.LANTERN_MASTHEAD, () => setCircuit('LANTERN_MASTHEAD', !c.LANTERN_MASTHEAD)));
+      container.appendChild(makeCircuitButton('Steaming light', c.LANTERN_STEAM, () => setCircuit('LANTERN_STEAM', !c.LANTERN_STEAM)));
+      container.appendChild(makeCircuitButton('Deck light', c.DECK_LIGHT, () => setCircuit('DECK_LIGHT', !c.DECK_LIGHT)));
+      container.appendChild(makeCircuitButton('Cockpit outlet', c.F5, () => setCircuit('F5', !c.F5)));
     }
 
     function renderControl(status) {
@@ -197,11 +230,14 @@
 
       const summary = `state: ${status.state} | streaming: ${status.streaming}`;
       const hasIssue = status.state !== 'OPERATIONAL' || !status.streaming;
-      setStateLine(hasIssue ? summary : '');
+      setStateLine('state', hasIssue ? summary : '');
+      setStateLine('essentials-state', hasIssue ? summary : '');
 
       const circuitsSummary = Object.entries(status.circuits)
         .map(([name, on]) => `${name}: ${on ? 'ON' : 'OFF'}`).join(', ');
       document.getElementById('diag-status').textContent = `${summary} — ${circuitsSummary}`;
+
+      renderEssentials(status);
 
       const names = Object.keys(status.circuits);
       renderConfigOnce(names);
@@ -230,10 +266,12 @@
           lastEtag = resp.headers.get('ETag');
           renderControl(await resp.json());
         } else {
-          setStateLine(`state: error ${resp.status}`);
+          setStateLine('state', `state: error ${resp.status}`);
+          setStateLine('essentials-state', `state: error ${resp.status}`);
         }
       } catch (err) {
-        setStateLine('state: unreachable');
+        setStateLine('state', 'state: unreachable');
+        setStateLine('essentials-state', 'state: unreachable');
       }
       setTimeout(poll, POLL_MS);
     }
