@@ -12,30 +12,168 @@
   <meta charset="UTF-8">
   <title>Virtual Bavaria Panel</title>
   <style>
-    body { font-family: sans-serif; margin: 20px; background-color: #f0f8ff; }
-    button {
+    /* Dark theme matching the B&G Zeus MFD's own chrome: near-black
+       background, dark-gray tiles, light-gray text, lime-green for
+       live/active state (matches the MFD's own instrument readout color). */
+    :root {
+      --bg: #1c1c1e;
+      --surface: #2a2a2c;
+      --surface-hover: #38383a;
+      --border: #3a3a3c;
+      --text-primary: #f2f2f2;
+      --text-secondary: #9a9a9c;
+      --accent: #7ed321;
+      --accent-text: #10210a;
+    }
+    body {
+      font-family: -apple-system, "Segoe UI", Roboto, sans-serif;
+      margin: 0;
+      background-color: var(--bg);
+      color: var(--text-primary);
+    }
+    nav { display: flex; border-bottom: 1px solid var(--border); }
+    nav button {
+      flex: 1;
+      padding: 14px;
+      font-size: 1em;
+      border: none;
+      background: var(--surface);
+      color: var(--text-primary);
+      cursor: pointer;
+    }
+    nav button.active { background: var(--accent); color: var(--accent-text); font-weight: bold; }
+    .view { display: none; padding: 16px; }
+    .view.active { display: block; }
+    button.circuit {
       display: block;
-      width: 100%;
-      max-width: 320px;
+      width: 320px;
       font-size: 1.2em;
       padding: 10px 16px;
       margin: 6px 0;
       border: none;
       border-radius: 8px;
       cursor: pointer;
-      color: white;
+      background: var(--surface);
+      color: var(--text-primary);
     }
+    button.circuit.on { background: var(--accent); color: var(--accent-text); font-weight: bold; }
+    button.action-btn {
+      display: inline-block;
+      width: auto;
+      font-size: 1.1em;
+      padding: 10px 16px;
+      margin: 6px 0;
+      border: 2px solid var(--accent);
+      border-radius: 8px;
+      cursor: pointer;
+      background: var(--surface);
+      color: var(--text-primary);
+    }
+    button.action-btn:active { background: var(--accent); color: var(--accent-text); }
+    table.diag { border-collapse: collapse; }
+    table.diag td { padding: 4px 10px 4px 0; vertical-align: top; }
+    table.diag td:first-child { color: var(--text-secondary); white-space: nowrap; }
+    label.cfg-row { display: block; padding: 6px 0; font-size: 1.1em; color: var(--text-primary); }
   </style>
 </head>
 <body>
-  <h1>Virtual Bavaria Panel</h1>
-  <p id="state">state: loading&hellip;</p>
-  <div id="circuits">loading&hellip;</div>
+  <nav>
+    <button data-view="control" class="active">Control</button>
+    <button data-view="diagnostics">Diagnostics</button>
+    <button data-view="config">Config</button>
+  </nav>
+
+  <section id="view-control" class="view active">
+    <p id="state">state: loading&hellip;</p>
+    <div id="circuits">loading&hellip;</div>
+  </section>
+
+  <section id="view-diagnostics" class="view">
+    <p id="diag-status">state: loading&hellip;</p>
+    <p>Reports live — resize/split the MFD screen and watch these change.</p>
+    <p><button class="action-btn" onclick="location.reload(true)">Reload &amp; send diagnostics</button></p>
+    <table class="diag">
+      <tr><td>window.innerWidth &times; innerHeight</td><td id="d-window"></td></tr>
+      <tr><td>screen.width &times; height</td><td id="d-screen"></td></tr>
+      <tr><td>devicePixelRatio</td><td id="d-dpr"></td></tr>
+      <tr><td>visibilityState</td><td id="d-visibility"></td></tr>
+      <tr><td>localStorage</td><td id="d-localstorage"></td></tr>
+      <tr><td>sessionStorage</td><td id="d-sessionstorage"></td></tr>
+      <tr><td>userAgent</td><td id="d-ua"></td></tr>
+    </table>
+  </section>
+
+  <section id="view-config" class="view">
+    <p>Choose which circuits show on the Control view.</p>
+    <div id="config-list">loading&hellip;</div>
+  </section>
 
   <script>
+    // -- nav: one document, three views toggled via location.hash --
+    function showView(name) {
+      document.querySelectorAll('.view').forEach(el => el.classList.remove('active'));
+      document.querySelectorAll('nav button').forEach(el => el.classList.remove('active'));
+      document.getElementById(`view-${name}`).classList.add('active');
+      document.querySelector(`nav button[data-view="${name}"]`).classList.add('active');
+    }
+    document.querySelectorAll('nav button').forEach(btn => {
+      btn.addEventListener('click', () => { location.hash = btn.dataset.view; });
+    });
+    window.addEventListener('hashchange', () => {
+      showView(location.hash.slice(1) || 'control');
+    });
+    showView(location.hash.slice(1) || 'control');
+
+    // -- config: which circuits are visible on Control, persisted in localStorage --
+    const VISIBLE_KEY = 'vbp.visibleCircuits';
+    let lastStatus = null; // last full status we rendered from, for instant config-change re-renders
+
+    function getVisibleSet() {
+      try {
+        const raw = localStorage.getItem(VISIBLE_KEY);
+        return raw === null ? null : new Set(JSON.parse(raw)); // null = "show all"
+      } catch (err) {
+        return null; // localStorage unavailable -> just show everything
+      }
+    }
+    function setVisibleSet(set) {
+      try {
+        localStorage.setItem(VISIBLE_KEY, JSON.stringify([...set]));
+      } catch (err) {
+        // can't persist here; Config checkboxes still work for this page load
+      }
+      if (lastStatus) renderControl(lastStatus); // re-render now, don't wait for the next poll
+    }
+    function isVisible(name) {
+      const set = getVisibleSet();
+      return set === null || set.has(name);
+    }
+
+    let configRendered = false;
+    function renderConfigOnce(circuitNames) {
+      if (configRendered) return;
+      configRendered = true;
+      const container = document.getElementById('config-list');
+      container.innerHTML = '';
+      for (const name of circuitNames) {
+        const row = document.createElement('label');
+        row.className = 'cfg-row';
+        const cb = document.createElement('input');
+        cb.type = 'checkbox';
+        cb.checked = isVisible(name);
+        cb.addEventListener('change', () => {
+          const current = getVisibleSet() || new Set(circuitNames);
+          if (cb.checked) current.add(name); else current.delete(name);
+          setVisibleSet(current);
+        });
+        row.appendChild(cb);
+        row.append(' ' + name);
+        container.appendChild(row);
+      }
+    }
+
+    // -- control: poll GET /status (conditional, via ETag), render, POST on click --
     const POLL_MS = 500;
-    const ON_COLOR = '#0077cc';
-    const OFF_COLOR = '#888888';
 
     async function setCircuit(name, on) {
       await fetch(`/circuits/${name}`, {
@@ -45,36 +183,86 @@
       });
     }
 
-    function render(status) {
-      document.getElementById('state').textContent =
-        `state: ${status.state} | streaming: ${status.streaming}`;
+    // Control's #state line only shows when there's something to flag —
+    // otherwise it's just the circuit buttons. Diagnostics always shows
+    // full status, since that's the point of that tab.
+    function setStateLine(text) {
+      const el = document.getElementById('state');
+      el.textContent = text;
+      el.style.display = text ? '' : 'none';
+    }
+
+    function renderControl(status) {
+      lastStatus = status;
+
+      const summary = `state: ${status.state} | streaming: ${status.streaming}`;
+      const hasIssue = status.state !== 'OPERATIONAL' || !status.streaming;
+      setStateLine(hasIssue ? summary : '');
+
+      const circuitsSummary = Object.entries(status.circuits)
+        .map(([name, on]) => `${name}: ${on ? 'ON' : 'OFF'}`).join(', ');
+      document.getElementById('diag-status').textContent = `${summary} — ${circuitsSummary}`;
+
+      const names = Object.keys(status.circuits);
+      renderConfigOnce(names);
 
       const container = document.getElementById('circuits');
       container.innerHTML = '';
       for (const [name, on] of Object.entries(status.circuits)) {
+        if (!isVisible(name)) continue;
         const btn = document.createElement('button');
+        btn.className = on ? 'circuit on' : 'circuit';
         btn.textContent = `${name}: ${on ? 'ON' : 'OFF'}`;
-        btn.style.backgroundColor = on ? ON_COLOR : OFF_COLOR;
         btn.onclick = () => setCircuit(name, !on);
         container.appendChild(btn);
       }
     }
 
+    let lastEtag = null;
+
     async function poll() {
       try {
-        const resp = await fetch('/status');
-        if (resp.ok) {
-          render(await resp.json());
+        const headers = lastEtag ? { 'If-None-Match': lastEtag } : {};
+        const resp = await fetch('/status', { headers });
+        if (resp.status === 304) {
+          // server confirmed nothing changed — no body was even sent
+        } else if (resp.ok) {
+          lastEtag = resp.headers.get('ETag');
+          renderControl(await resp.json());
         } else {
-          document.getElementById('state').textContent = `state: error ${resp.status}`;
+          setStateLine(`state: error ${resp.status}`);
         }
       } catch (err) {
-        document.getElementById('state').textContent = 'state: unreachable';
+        setStateLine('state: unreachable');
       }
       setTimeout(poll, POLL_MS);
     }
-
     poll();
+
+    // -- diagnostics: live window/screen/storage report --
+    function testStorage(storage) {
+      try {
+        storage.setItem('vbp_test', '1');
+        const ok = storage.getItem('vbp_test') === '1';
+        storage.removeItem('vbp_test');
+        return ok ? 'available' : 'broken (write/read mismatch)';
+      } catch (err) {
+        return `unavailable (${err.name})`;
+      }
+    }
+
+    function renderDiagnostics() {
+      document.getElementById('d-window').textContent = `${window.innerWidth} × ${window.innerHeight}`;
+      document.getElementById('d-screen').textContent = `${screen.width} × ${screen.height}`;
+      document.getElementById('d-dpr').textContent = window.devicePixelRatio;
+      document.getElementById('d-visibility').textContent = document.visibilityState;
+      document.getElementById('d-ua').textContent = navigator.userAgent;
+    }
+    window.addEventListener('resize', renderDiagnostics);
+    document.addEventListener('visibilitychange', renderDiagnostics);
+    renderDiagnostics();
+    document.getElementById('d-localstorage').textContent = testStorage(window.localStorage);
+    document.getElementById('d-sessionstorage').textContent = testStorage(window.sessionStorage);
   </script>
 </body>
 </html>

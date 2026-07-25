@@ -174,12 +174,16 @@ class GatewayRuntime:
             self._execute(actions)
             self.command_queue.drain()
 
+    def request_shutdown(self) -> None:
+        """Thread-safe: signal handlers may call this from outside the main loop."""
+        self._shutdown.set()
+
     def shutdown(self) -> None:
         self._shutdown.set()
         self.deactivate()
         if self.sm.state not in (PASSIVE, DEACTIVATING):
             # e.g. interrupted mid-ACTIVATING: hand back regardless.
-            log.warning("shutdown in state %s — best-effort release", state.name)
+            log.warning("shutdown in state %s — best-effort release", self.sm.state.name)
             self._release()
         self.streamer.stop()
         self.streamer.join(timeout=1.0)

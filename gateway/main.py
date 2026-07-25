@@ -8,6 +8,7 @@ releases control back to the panel before exiting.
 
 import argparse
 import logging
+import signal
 
 from gateway.config import load_config
 from gateway.runtime import GatewayRuntime
@@ -30,6 +31,9 @@ def main() -> None:
     log.info("gateway starting on %s/%s", cfg.can_interface, cfg.can_channel)
 
     runtime = GatewayRuntime(cfg)
+    # systemd sends SIGTERM on stop/restart/reboot; Python doesn't act on it
+    # by default, so without this the 1400:1 release-on-shutdown never runs.
+    signal.signal(signal.SIGTERM, lambda *_: runtime.request_shutdown())
     if args.activate:
         runtime.activate()
     try:

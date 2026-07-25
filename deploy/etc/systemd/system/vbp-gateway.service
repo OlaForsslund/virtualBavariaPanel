@@ -1,0 +1,16 @@
+[Unit]
+Description=Virtual Bavaria Panel gateway (CANopen takeover + REST/WebSocket API)
+After=vbp-can0.service
+Requires=vbp-can0.service
+
+[Service]
+Environment=VBP_CAN_INTERFACE=socketcan
+Environment=VBP_CAN_CHANNEL=can0
+WorkingDirectory=/home/ola/virtualBavariaPanel
+ExecStart=/home/ola/virtualBavariaPanel/.venv/bin/python -m gateway.main --activate
+Restart=on-failure
+RestartSec=5
+User=ola
+
+[Install]
+WantedBy=multi-user.target

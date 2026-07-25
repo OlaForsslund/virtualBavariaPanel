@@ -9,9 +9,11 @@ directly — only `runtime.command_queue.submit()` to send commands and
 
 from __future__ import annotations
 
+from pathlib import Path
 from typing import TYPE_CHECKING
 
 from fastapi import FastAPI, HTTPException
+from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel
 
 from gateway.constants import RELAYS
@@ -20,6 +22,8 @@ if TYPE_CHECKING:
     # Only for the type hint below — runtime.py imports create_app, so a
     # module-level import here would be circular.
     from gateway.runtime import GatewayRuntime
+
+WEBAPP_DIR = Path(__file__).resolve().parent.parent / "webapp"
 
 
 class CircuitCommand(BaseModel):
@@ -55,5 +59,12 @@ def create_app(runtime: GatewayRuntime) -> FastAPI:
         # the client reads back the result via GET /status, not this response.
         runtime.command_queue.submit(lambda: runtime.cmd_set_circuit(mask, command.on))
         return {"circuit": name, "requested": command.on}
+
+    # Serves the webapp directly so `gateway.main --activate` alone is enough
+    # to try it out — the full boat deployment fronts this with lighttpd
+    # instead (deploy/etc/lighttpd/conf-available/20-vbp-proxy.conf), which
+    # serves webapp/ itself and only proxies the API routes above, never
+    # reaching this mount. Registered last so it doesn't shadow them.
+    app.mount("/", StaticFiles(directory=WEBAPP_DIR, html=True), name="webapp")
 
     return app

@@ -1,0 +1,13 @@
+[Unit]
+Description=Bring up can0 for the Virtual Bavaria Panel gateway
+Before=vbp-gateway.service
+
+[Service]
+Type=oneshot
+RemainAfterExit=yes
+ExecStartPre=-/usr/sbin/ip link set can0 down
+ExecStart=/usr/sbin/ip link set can0 up type can bitrate 250000 restart-ms 1000 berr-reporting on fd off
+ExecStop=/usr/sbin/ip link set can0 down
+
+[Install]
+WantedBy=multi-user.target
