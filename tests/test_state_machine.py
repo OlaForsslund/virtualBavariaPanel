@@ -44,12 +44,16 @@ def test_activate_without_board_waits():
     assert sm.state is ACTIVATING
 
 
-def test_adopts_board_state_on_entering_activating():
+def test_adopts_panel_state_on_entering_activating():
     # Must adopt BEFORE the repoint runs: the 0x18C stream is live during
     # ACTIVATING and zeros would blip every relay off at the switchover.
+    # Adopts the panel's bitmap, not the board's — the panel is the
+    # declared source of user intent, while the board can go to all-off on
+    # its own (RPDO supervision timeout after its command source vanishes,
+    # e.g. a hard Pi power-cycle with no graceful release).
     sm = GatewayStateMachine()
     sm.on_panel_frame(CAB1, 0.0)
-    sm.on_board_frame(CAB1, 0.0)
+    sm.on_board_frame(0, 0.0)  # board reports all-off; panel disagrees
     sm.activate(0.1)
     assert sm.state is ACTIVATING
     assert sm.output_bitmap == CAB1

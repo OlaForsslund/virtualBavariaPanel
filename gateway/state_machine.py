@@ -127,7 +127,10 @@ class ActivatingState(State):
         # Adopt current state NOW: the 0x18C stream starts during
         # ACTIVATING and must already carry the right bitmap the moment
         # the board's RPDO enables on it (else relays blip).
-        adopted = ctx.board_bitmap if ctx.board_bitmap is not None else ctx.panel_bitmap
+        #
+        # Adopt the panel's state as it has the memory, board does not and
+	# reverts its state to zero if not pannel commands come in.
+        adopted = ctx.panel_bitmap if ctx.panel_bitmap is not None else ctx.board_bitmap
         ctx.output_bitmap = adopted or 0
         return [Action.REPOINT]
 

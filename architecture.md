@@ -135,7 +135,9 @@ stateDiagram-v2
   board is alive (`0x20B` traffic flowing, or its one-shot `0x495`/`0x715`
   boot frames) before attempting the repoint.
 - **ACTIVATING** — performs the disable → set → enable repoint of `1400:1`
-  (§4). SDO abort or timeout returns to WAITING_FOR_BOARD.
+  (§4). SDO abort or timeout returns to WAITING_FOR_BOARD. On entry, adopts
+  the panel's bitmap as `output_bitmap` since it has the memory. Board
+  resets its state when pannel stream is stoped.
 - **ACTIVE** — the gateway is the gate: streams `0x18C` with alternating
   toggle bit, arbitrates panel edges vs web commands (§5), and watches the
   reboot signals (§4). Any reboot signal drops back to WAITING_FOR_BOARD,
