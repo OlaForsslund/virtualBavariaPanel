@@ -1,3 +1,5 @@
+from unittest.mock import patch
+
 from fastapi.testclient import TestClient
 
 from gateway.command_queue import CommandQueue
@@ -101,3 +103,13 @@ def test_post_circuit_rejects_a_missing_body():
     resp = client.post("/circuits/ANCHOR", json={})
 
     assert resp.status_code == 422
+
+
+def test_post_system_restart_shells_out_to_systemctl_reboot():
+    client = TestClient(create_app(StubRuntime()))
+
+    with patch("gateway.web.subprocess.Popen") as mock_popen:
+        resp = client.post("/system/restart")
+
+    assert resp.status_code == 202
+    mock_popen.assert_called_once_with(["sudo", "systemctl", "reboot"])

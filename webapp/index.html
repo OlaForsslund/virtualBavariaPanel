@@ -31,6 +31,13 @@
       background-color: var(--bg);
       color: var(--text-primary);
     }
+    #top-bar {
+      display: flex;
+      gap: 8px;
+      padding-bottom: 12px;
+      margin-bottom: 12px;
+      border-bottom: 1px solid var(--border);
+    }
     nav { display: flex; border-bottom: 1px solid var(--border); }
     nav button {
       flex: 1;
@@ -70,6 +77,8 @@
       color: var(--text-primary);
     }
     button.action-btn:active { background: var(--accent); color: var(--accent-text); }
+    button.action-btn.danger { border-color: #d9534f; }
+    button.action-btn.danger:active { background: #d9534f; color: var(--text-primary); }
     table.diag { border-collapse: collapse; }
     table.diag td { padding: 4px 10px 4px 0; vertical-align: top; }
     table.diag td:first-child { color: var(--text-secondary); white-space: nowrap; }
@@ -113,7 +122,7 @@
   <nav>
     <button data-view="essentials" class="active">Essentials</button>
     <button data-view="control">All Controls</button>
-    <button data-view="config">Config</button>
+    <button data-view="config">Settings</button>
   </nav>
 
   <section id="view-essentials" class="view active">
@@ -146,7 +155,6 @@
   <section id="view-diagnostics" class="view">
     <p id="diag-status">state: loading&hellip;</p>
     <p>Reports live — resize/split the MFD screen and watch these change.</p>
-    <p><button class="action-btn" onclick="location.reload(true)">Reload &amp; send diagnostics</button></p>
     <table class="diag">
       <tr><td>window.innerWidth &times; innerHeight</td><td id="d-window"></td></tr>
       <tr><td>screen.width &times; height</td><td id="d-screen"></td></tr>
@@ -159,6 +167,10 @@
   </section>
 
   <section id="view-config" class="view">
+    <header id="top-bar">
+      <button class="action-btn" onclick="location.reload(true)">Reload &amp; send diagnostics</button>
+      <button class="action-btn danger" onclick="restartPi()">Restart Pi</button>
+    </header>
     <p>Choose which circuits show on the Control view.</p>
     <div id="config-list">loading&hellip;</div>
     <p><button class="action-btn" onclick="location.hash='diagnostics'">Diagnostics</button></p>
@@ -182,6 +194,17 @@
       showView(location.hash.slice(1) || 'essentials');
     });
     showView(location.hash.slice(1) || 'essentials');
+
+    // -- top bar: Restart Pi --
+    async function restartPi() {
+      if (!confirm('Restart the Raspberry Pi now? Control drops back to the panel and it takes about a minute to come back online.')) return;
+      try {
+        await fetch('/system/restart', { method: 'POST' });
+      } catch (err) {
+        // expected once the Pi actually goes down mid-response
+      }
+      alert('Restart requested — back online in about a minute.');
+    }
 
     // -- config: which circuits are visible on Control, persisted in localStorage --
     const VISIBLE_KEY = 'vbp.visibleCircuits';

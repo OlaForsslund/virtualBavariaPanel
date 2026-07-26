@@ -9,6 +9,7 @@ directly — only `runtime.command_queue.submit()` to send commands and
 
 from __future__ import annotations
 
+import subprocess
 from pathlib import Path
 from typing import TYPE_CHECKING
 
@@ -71,6 +72,15 @@ def create_app(runtime: GatewayRuntime) -> FastAPI:
         # the client reads back the result via GET /status, not this response.
         runtime.command_queue.submit(lambda: runtime.cmd_set_circuit(mask, command.on))
         return {"circuit": name, "requested": command.on}
+
+    @app.post("/system/restart", status_code=202)
+    def restart_system() -> dict:
+        # Fire-and-forget, non-blocking: `systemctl reboot` returns once the
+        # shutdown is queued, well before the Pi actually goes down, so the
+        # HTTP response still reaches the browser. `ola` has passwordless
+        # sudo on this box already (deploy prerequisite, not set up here).
+        subprocess.Popen(["sudo", "systemctl", "reboot"])
+        return {"status": "restarting"}
 
     # Serves the webapp directly so `gateway.main --activate` alone is enough
     # to try it out — the full boat deployment fronts this with lighttpd

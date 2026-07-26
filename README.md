@@ -68,6 +68,18 @@ Configuration is via environment variables read by `gateway/config.py`
 (CAN interface/channel, web port, log level, etc.) — set them in the unit
 file if the defaults (`socketcan`/`can0`, port `8000`) don't apply.
 
+The webapp's Settings page has a "Restart Pi" button (`POST
+/system/restart`), which shells out to `sudo systemctl reboot`. The
+gateway runs as an unprivileged user, so that user needs passwordless sudo
+for it — add a sudoers drop-in:
+
+```
+echo 'ola ALL=(ALL) NOPASSWD: /usr/bin/systemctl reboot' | sudo tee /etc/sudoers.d/vbp-restart
+```
+
+(replace `ola` with whichever user runs `vbp-gateway.service`). Without
+this, the button's request will just fail.
+
 ### Virtual Panel as a webapp
 
 `webapp/` is the static frontend; `lighttpd` serves it and reverse-proxies
