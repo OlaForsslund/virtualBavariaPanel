@@ -100,7 +100,28 @@ mirror images. **Identical mapping** on both — the difference is firmware role
 - **Panel is a state _source only_** — confirmed. Its `0x4000` is RO and its `0x4001` inbox is
   never folded into state. A real, toggling `20B` carrying a *mismatched* state is **silently
   ignored** (no adopt, no EMCY). Only physical buttons change panel state. No bus path, flag
-  bit, or SDO can command the panel.
+  bit, or SDO can command the panel. Also tried (2026-07-25, gateway stopped so the board was
+  back on the panel's `18B`, ruling out any gateway interference):
+  - repeated SDO `download` writes straight to `0x4001` with only the alive-toggle bit
+    alternating each write (rest of the value unchanged from the panel's own state) — accepted
+    (no abort) but `0x4000` never moved and its own toggle bit stayed pinned
+    (capture: `panel_4001_toggle_probe`).
+  - the same, but with an actual state change (`CABIN_LIGHTS1`/`CABIN_LIGHTS2` cleared, a real
+    bit flip, not just the toggle) — same result: `0x4000` never reflected the write, cabin
+    lights stayed on throughout. Conclusive: the panel ignores `0x4001` unconditionally, over
+    SDO exactly as over PDO, independent of toggle alternation or whether the value differs
+    from current state.
+- **No writable object on the panel reaches relay/button state, full stop.** Every writable
+  object found in the sweep is a comms/PDO-parameter object — `1400:1`/`1400:2` (RPDO COB-ID/
+  txtype), `1800:1`/`1800:2`/`1800:5` (TPDO COB-ID/txtype/inhibit), and the standard objects
+  `1005`,`1006`,`1007`,`100C`,`100D`,`1015`,`1017`. `1800:1` (redirecting where the panel
+  *sends* its own state) is the one of these never actually exercised — but since panel state
+  is button-owned regardless of where it's broadcast, redirecting the output can't create a
+  command path either. Everything else that touches state (`4000`, `4001`'s effect, `2304`,
+  `2305`, `2600`, `2601`, all of `2200`–`2822`) is RO or write-accepted-but-ignored. This closes
+  out the "can the panel be commanded over the bus" question from `architecture.md` §1.1 —
+  no combination of object, toggle bit, or value tried unlocks it; control must stay board-side
+  (the repoint approach).
 - **Board vs panel = same firmware, opposite role:** the board copies its RPDO inbox
   (`0x4001`) into its state (`0x4000` + relays); the panel does not. This role — not the
   mapping — is why the board follows and the panel leads.

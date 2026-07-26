@@ -1,0 +1,8 @@
+panel 0x4000 before: bitmap=0x200430 (CABIN_LIGHTS2, CABIN_LIGHTS1, INSTRUMENTS, WATER) toggle=False
+  write 0: 0x4001 <- 30042000 (toggle=False) [ok] -> 0x4000 bitmap=0x200430 toggle=False (unchanged)
+  write 1: 0x4001 <- 31042000 (toggle=True) [ok] -> 0x4000 bitmap=0x200430 toggle=False (unchanged)
+  write 2: 0x4001 <- 30042000 (toggle=False) [ok] -> 0x4000 bitmap=0x200430 toggle=False (unchanged)
+  write 3: 0x4001 <- 31042000 (toggle=True) [ok] -> 0x4000 bitmap=0x200430 toggle=False (unchanged)
+  write 4: 0x4001 <- 30042000 (toggle=False) [ok] -> 0x4000 bitmap=0x200430 toggle=False (unchanged)
+  write 5: 0x4001 <- 31042000 (toggle=True) [ok] -> 0x4000 bitmap=0x200430 toggle=False (unchanged)
+done — if every line reads '(unchanged)', the panel ignores 0x4001 regardless of toggle alternation, over SDO same as over PDO.
