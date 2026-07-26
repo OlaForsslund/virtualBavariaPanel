@@ -34,6 +34,7 @@ log = logging.getLogger("gateway")
 
 INVALID_BIT = 0x80000000
 TICK_PERIOD = 0.1
+SENSOR_POLL_PERIOD = 5.0
 
 
 class StreamBuffer:
@@ -122,6 +123,27 @@ class StatusBuffer:
         self.snapshot: StatusSnapshot | None = None
 
 
+@dataclass(frozen=True)
+class SensorSnapshot:
+    starter_voltage: float
+    house_voltage: float
+    freshwater_pct: int
+    blackwater_pct: int
+    read_at: float  # time.monotonic() of the read, so staleness is visible to callers
+
+
+class SensorBuffer:
+    """Same lock-free single-writer/multi-reader hand-off as StatusBuffer,
+    for the panel's analog sensors (battery voltages, tank levels). Polled
+    on its own cadence (SENSOR_POLL_PERIOD), independent of state-machine
+    ticks — reading these is plain SDO traffic to the panel node, unrelated
+    to the takeover/repoint mechanism.
+    """
+
+    def __init__(self) -> None:
+        self.snapshot: SensorSnapshot | None = None
+
+
 class GatewayRuntime:
     def __init__(self, cfg: Config) -> None:
         self.cfg = cfg
@@ -129,6 +151,7 @@ class GatewayRuntime:
         self.monitor = BusMonitor()
         self.stream_buffer = StreamBuffer()
         self.status_buffer = StatusBuffer()
+        self.sensor_buffer = SensorBuffer()
         self.command_queue = CommandQueue()
         self._logged_state = self.sm.state
         self._shutdown = threading.Event()
@@ -138,6 +161,7 @@ class GatewayRuntime:
         self.network = canopen.Network()
         self.network.connect(interface=cfg.can_interface, channel=cfg.can_channel)
         self.node = self.network.add_node(constants.BOARD_NODE_ID)
+        self.panel_node = self.network.add_node(constants.PANEL_NODE_ID)
         self.streamer = Streamer(self.bus, cfg.stream_period, self.stream_buffer)
         self.web_server = WebServer(create_app(self), cfg.web_host, cfg.web_port)
 
@@ -160,6 +184,7 @@ class GatewayRuntime:
         self.streamer.start()
         self.web_server.start()
         last_tick = 0.0
+        last_sensor_poll = 0.0
         while not self._shutdown.is_set():
             msg = self.bus.recv(timeout=TICK_PERIOD)
             now = time.monotonic()
@@ -173,6 +198,9 @@ class GatewayRuntime:
                 last_tick = now
             self._execute(actions)
             self.command_queue.drain()
+            if now - last_sensor_poll >= SENSOR_POLL_PERIOD:
+                self._poll_sensors()
+                last_sensor_poll = now
 
     def request_shutdown(self) -> None:
         """Thread-safe: signal handlers may call this from outside the main loop."""
@@ -259,6 +287,29 @@ class GatewayRuntime:
     def _release(self) -> None:
         if not self._repoint(constants.COB_GATEWAY_STATE, constants.COB_PANEL_STATE):
             log.error("release write failed — board reverts on its next power cycle")
+
+    def _poll_sensors(self) -> None:
+        try:
+            starter_raw = int.from_bytes(
+                self.panel_node.sdo.upload(constants.BATTERY_STARTER_INDEX, constants.BATTERY_STARTER_SUB)[:2],
+                "little",
+            )
+            house_raw = int.from_bytes(
+                self.panel_node.sdo.upload(constants.BATTERY_HOUSE_INDEX, constants.BATTERY_HOUSE_SUB)[:2],
+                "little",
+            )
+            fresh_pct = self.panel_node.sdo.upload(constants.TANK_FRESHWATER_INDEX, constants.TANK_FRESHWATER_SUB)[0]
+            black_pct = self.panel_node.sdo.upload(constants.TANK_BLACKWATER_INDEX, constants.TANK_BLACKWATER_SUB)[0]
+        except (canopen.SdoAbortedError, canopen.SdoCommunicationError) as exc:
+            log.warning("sensor poll failed: %s", exc)
+            return
+        self.sensor_buffer.snapshot = SensorSnapshot(
+            starter_voltage=round(starter_raw * constants.BATTERY_VOLTS_PER_COUNT, 2),
+            house_voltage=round(house_raw * constants.BATTERY_VOLTS_PER_COUNT, 2),
+            freshwater_pct=fresh_pct,
+            blackwater_pct=black_pct,
+            read_at=time.monotonic(),
+        )
 
     def _log_state(self) -> None:
         state = self.sm.state

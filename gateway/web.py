@@ -50,6 +50,18 @@ def create_app(runtime: GatewayRuntime) -> FastAPI:
             },
         }
 
+    @app.get("/sensors")
+    def get_sensors() -> dict:
+        snapshot = runtime.sensor_buffer.snapshot
+        if snapshot is None:
+            raise HTTPException(status_code=503, detail="sensors not read yet")
+        return {
+            "starter_voltage": snapshot.starter_voltage,
+            "house_voltage": snapshot.house_voltage,
+            "freshwater_pct": snapshot.freshwater_pct,
+            "blackwater_pct": snapshot.blackwater_pct,
+        }
+
     @app.post("/circuits/{name}", status_code=202)
     def set_circuit(name: str, command: CircuitCommand) -> dict:
         mask = RELAYS.get(name)

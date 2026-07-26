@@ -74,13 +74,45 @@
     table.diag td { padding: 4px 10px 4px 0; vertical-align: top; }
     table.diag td:first-child { color: var(--text-secondary); white-space: nowrap; }
     label.cfg-row { display: block; padding: 6px 0; font-size: 1.1em; color: var(--text-primary); }
+    .control-layout { display: flex; align-items: flex-start; gap: 56px; }
+    /* Sensor sidebar: only worth showing when there's room next to the
+       circuit buttons — full/near-full screen — not in the MFD's narrower
+       split-screen layouts (mfd_display_notes-zeus3-7.md). */
+    #sensors-panel { display: none; }
+    @media (min-width: 700px) {
+      #sensors-panel {
+        display: block;
+        flex: 0 0 200px;
+        background: var(--surface);
+        border-radius: 8px;
+        padding: 12px 16px;
+      }
+    }
+    #sensors-panel h3 {
+      margin: 0 0 12px;
+      font-size: 1em;
+      color: var(--text-secondary);
+      font-weight: normal;
+    }
+    .gauge { margin-bottom: 14px; }
+    .gauge-label { font-size: 0.9em; color: var(--text-secondary); margin-bottom: 4px; }
+    .gauge-bar { background: var(--border); border-radius: 6px; height: 14px; overflow: hidden; }
+    .gauge-fill { background: var(--accent); height: 100%; transition: width 0.3s; }
+    #gauge-fresh { background: #3ba7ff; }
+    .gauge-value { font-size: 0.85em; color: var(--text-secondary); margin-top: 2px; text-align: right; }
+    .battery-row {
+      display: flex;
+      justify-content: space-between;
+      font-size: 1em;
+      padding: 6px 0;
+      border-top: 1px solid var(--border);
+    }
   </style>
 </head>
 <body>
   <nav>
     <button data-view="essentials" class="active">Essentials</button>
     <button data-view="control">All Controls</button>
-    <button data-view="diagnostics">Diagnostics</button>
     <button data-view="config">Config</button>
   </nav>
 
@@ -91,7 +123,24 @@
 
   <section id="view-control" class="view">
     <p id="state">state: loading&hellip;</p>
-    <div id="circuits">loading&hellip;</div>
+    <div class="control-layout">
+      <div id="circuits">loading&hellip;</div>
+      <aside id="sensors-panel">
+        <h3>Tanks &amp; Batteries</h3>
+        <div class="gauge">
+          <div class="gauge-label">Freshwater</div>
+          <div class="gauge-bar"><div class="gauge-fill" id="gauge-fresh" style="width:0%"></div></div>
+          <div class="gauge-value" id="value-fresh">&mdash;</div>
+        </div>
+        <div class="gauge">
+          <div class="gauge-label">Blackwater</div>
+          <div class="gauge-bar"><div class="gauge-fill" id="gauge-black" style="width:0%"></div></div>
+          <div class="gauge-value" id="value-black">&mdash;</div>
+        </div>
+        <div class="battery-row"><span>Starter</span><span id="value-starter">&mdash;</span></div>
+        <div class="battery-row"><span>House</span><span id="value-house">&mdash;</span></div>
+      </aside>
+    </div>
   </section>
 
   <section id="view-diagnostics" class="view">
@@ -112,6 +161,7 @@
   <section id="view-config" class="view">
     <p>Choose which circuits show on the Control view.</p>
     <div id="config-list">loading&hellip;</div>
+    <p><button class="action-btn" onclick="location.hash='diagnostics'">Diagnostics</button></p>
   </section>
 
   <script>
@@ -120,7 +170,10 @@
       document.querySelectorAll('.view').forEach(el => el.classList.remove('active'));
       document.querySelectorAll('nav button').forEach(el => el.classList.remove('active'));
       document.getElementById(`view-${name}`).classList.add('active');
-      document.querySelector(`nav button[data-view="${name}"]`).classList.add('active');
+      // Diagnostics has no nav button (reached via Config instead), so this
+      // can legitimately be null -- guard rather than assume a match.
+      const navBtn = document.querySelector(`nav button[data-view="${name}"]`);
+      if (navBtn) navBtn.classList.add('active');
     }
     document.querySelectorAll('nav button').forEach(btn => {
       btn.addEventListener('click', () => { location.hash = btn.dataset.view; });
@@ -253,6 +306,31 @@
         container.appendChild(btn);
       }
     }
+
+    // -- sensors sidebar: separate slow poll, matches the backend's own
+    // 5s read cadence (gateway/runtime.py SENSOR_POLL_PERIOD) — no point
+    // polling faster than the source updates.
+    const SENSOR_POLL_MS = 5000;
+
+    function renderSensors(data) {
+      document.getElementById('gauge-fresh').style.width = `${data.freshwater_pct}%`;
+      document.getElementById('value-fresh').textContent = `${data.freshwater_pct}%`;
+      document.getElementById('gauge-black').style.width = `${data.blackwater_pct}%`;
+      document.getElementById('value-black').textContent = `${data.blackwater_pct}%`;
+      document.getElementById('value-starter').textContent = `${data.starter_voltage.toFixed(2)} V`;
+      document.getElementById('value-house').textContent = `${data.house_voltage.toFixed(2)} V`;
+    }
+
+    async function pollSensors() {
+      try {
+        const resp = await fetch('/sensors');
+        if (resp.ok) renderSensors(await resp.json());
+      } catch (err) {
+        // sidebar just keeps showing the last good reading
+      }
+      setTimeout(pollSensors, SENSOR_POLL_MS);
+    }
+    pollSensors();
 
     let lastEtag = null;
 

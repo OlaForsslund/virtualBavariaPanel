@@ -24,6 +24,24 @@ RPDO1_COB_ID_SUB = 1
 
 EMCY_CAN_ERROR_PASSIVE = 0x8120  # benign burst at startup
 
+# Panel analog sensors (panel_od_map.md "Analog sensor readings", found/
+# calibrated 2026-07-25). Read via SDO upload from the panel node directly —
+# independent of the takeover/repoint mechanism, safe to poll in any state.
+BATTERY_STARTER_INDEX = 0x2200
+BATTERY_STARTER_SUB = 15
+BATTERY_HOUSE_INDEX = 0x2200
+BATTERY_HOUSE_SUB = 17
+TANK_FRESHWATER_INDEX = 0x2501
+TANK_FRESHWATER_SUB = 1
+TANK_BLACKWATER_INDEX = 0x2501
+TANK_BLACKWATER_SUB = 4
+
+# Raw-count -> volts, calibrated against a trusted external voltmeter/Victron
+# (13.56V / 13.61V) at raw 909, NOT the panel's own display (which read 13.8V
+# for the same count — panel is ~0.2-0.24V high). Single-point calibration,
+# assumes a zero-offset linear scale (panel_od_map.md).
+BATTERY_VOLTS_PER_COUNT = 13.585 / 909
+
 # Relay-state frame: 4 bytes little-endian; bit 0 is the alive toggle
 # that must alternate every frame, bits 1..23 are circuits, byte 3 unused.
 TOGGLE_MASK = 0x00000001
