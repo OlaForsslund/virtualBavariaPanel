@@ -83,6 +83,12 @@ only when it actually grows multiple files (web_interface likely will).
 
 ## 5. Local Dev Loop
 
+Shortcut: `./run_simulated.sh` starts all three (relay_sim + gateway
+backgrounded, panel_sim in the foreground since it's the interactive one) and
+tears them all down on Ctrl-C. Use the manual per-terminal version below when
+you need to watch/restart one piece independently (e.g. killing just the
+gateway to test the re-takeover watchdog).
+
 Open a terminal, `cd` into the repo, and run `./run_venv.sh` to activate the
 venv — do this in every terminal below before its command.
 
@@ -97,6 +103,17 @@ venv — do this in every terminal below before its command.
 Then drive the web app or trigger panel_sim button presses; confirm state
 changes propagate correctly — including the arbitration cases (web overrides
 panel, panel toggle overrides web; see `architecture.md` §5).
+
+- **Terminal 5 (optional) — MFD layout preview:** with the gateway running,
+  open `http://localhost:8000/dev/zeus3_7_preview.html`. It's a harness, not
+  part of the app itself (kept under `webapp/dev/`, a subfolder, so it's
+  obviously separate from what ships as the actual UI): an iframe pointed
+  at the running app's own URL (editable, defaults to same-origin), pinned
+  to one of the Zeus3 7's confirmed split-screen widths
+  (`mfd_display_notes-zeus3-7.md`) at 100% zoom — no `transform: scale`, so
+  it's a true pixel-accurate preview, not an emulation. Use it to design/
+  check the webapp's layout at each split width without needing the MFD or
+  boat.
 
 ## 6. Hardware Validation Loop
 

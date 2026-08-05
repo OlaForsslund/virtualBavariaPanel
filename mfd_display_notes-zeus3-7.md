@@ -27,20 +27,27 @@ lets you size mockups without the physical MFD in hand.
 - MFD chrome overhead is a constant **26px of height** — every observed
   viewport was exactly 574px tall regardless of split layout, so the
   MFD's own UI (status bar etc.) always eats the same vertical strip.
-- Observed viewport **widths** (`window.innerWidth`) across different
-  split-screen layouts (heights all 574px):
+- Observed viewport **widths** (`window.innerWidth`), heights all 574px.
+  There's also a collapsible autopilot pane, permanently docked to the
+  left of the MFD's whole screen (separate from this app's own
+  split-pane layout); "active area" below means whatever's left after
+  the autopilot pane and other static MFD chrome. These four widths are
+  a clean 2×2 grid — {app full-screen vs. app split into two panes} ×
+  {autopilot collapsed vs. expanded} — not three-pane variants as
+  previously guessed here:
 
-  | Width | Layout (best guess — not confirmed against MFD screenshots) |
-  |-------|----------------------------------------------------------|
-  | 803px | Full screen, single pane |
-  | 642px | Two-pane split |
-  | 398px | Three-pane split (or two-pane + narrower divider position) |
-  | 318px | Narrowest observed — three-pane incl. autopilot, or a tighter divider position |
+  | Width | Autopilot pane | App layout |
+  |-------|----------------|------------|
+  | 803px | Collapsed      | Full screen, single pane (= active area total) |
+  | 642px | Expanded       | Full screen, single pane (= active area total) |
+  | 398px | Collapsed      | Split into two panes (~50/50, ~7px divider) |
+  | 318px | Expanded       | Split into two panes (~50/50, ~6px divider) |
 
-  The 398/318 pair showed up interchangeably while switching between the
-  Control and Diagnostics tabs in the same session, so they may reflect
-  divider dragging rather than two fixed presets — worth re-verifying
-  with a screenshot next time if the exact mapping matters.
+  Derivation: 803 − 2×398 = 7px divider; 642 − 2×318 = 6px divider — both
+  pairs agree on a near-even 50/50 split with a ~6–7px gutter between
+  panes, confirming the mapping. Expanding the autopilot pane costs
+  **161px** of active area (803 → 642) — a real cost, but still a
+  narrow sidebar, not a full pane ("still a thin thing" even expanded).
 
 ## Design takeaway
 

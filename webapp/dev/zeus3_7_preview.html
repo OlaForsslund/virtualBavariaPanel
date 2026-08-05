@@ -1,0 +1,322 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<title>Zeus3 7 preview simulator — Virtual Bavaria Panel</title>
+<style>
+  /* Deliberately a different look from the app itself (light workbench
+     gray vs. the app's dark MFD-matching theme) so it's never confused
+     with the thing being previewed. */
+  body {
+    font-family: -apple-system, "Segoe UI", Roboto, sans-serif;
+    margin: 0;
+    background: #e8e8ea;
+    color: #1c1c1e;
+  }
+  #toolbar {
+    display: flex;
+    align-items: center;
+    flex-wrap: wrap;
+    gap: 10px;
+    padding: 10px 16px;
+    background: #d4d4d8;
+    border-bottom: 1px solid #b8b8bc;
+  }
+  #toolbar h1 {
+    font-size: 0.95em;
+    font-weight: 600;
+    margin: 0 12px 0 0;
+    color: #45454a;
+  }
+  .btn {
+    padding: 6px 12px;
+    border: 1px solid #9a9a9e;
+    border-radius: 6px;
+    background: #f4f4f6;
+    cursor: pointer;
+    font-size: 0.9em;
+  }
+  .btn.active { background: #7ed321; border-color: #5ea813; font-weight: 600; }
+  .btn-group { display: flex; gap: 6px; }
+  #toolbar label { font-size: 0.85em; color: #45454a; display: flex; align-items: center; gap: 6px; }
+  #target-url { width: 220px; }
+  #reload-btn { padding: 6px 12px; border-radius: 6px; border: 1px solid #9a9a9e; background: #f4f4f6; cursor: pointer; }
+  #stage {
+    padding: 40px;
+    overflow-x: auto;
+  }
+  /* True 1:1 pixel-accurate mockup of the Zeus3 7's 1024x600 screen --
+     no transform: scale anywhere. Region widths (autopilot/border/data)
+     come from mfd_display_notes-zeus3-7.md's derived model: a persistent
+     48px autopilot toggle strip (+160px panel when expanded), ~6-7px
+     borders bracketing the active area, and a constant 160px data
+     readout. Only the active-area widths (803/642/398/318) and the
+     574px/26px height split are hardware-measured; the rest are
+     on-screen visual estimates that close the 1024px budget exactly.
+
+     Background: a real on-boat screenshot (Screenshot_20250713_104954_B&G-crop.jpg,
+     autopilot collapsed / single pane), pre-cropped to exactly 1024x600
+     so it lines up with #screen with no scaling. The non-content panes
+     are transparent so it shows through; only the live iframe(s) sit
+     opaque on top.
+
+     This base photo is only accurate for the collapsed state, EXCEPT
+     for the data-readout column (x864-1024) and the right-hand border,
+     which happen to land at the same x-range in both autopilot states
+     (autopilot growing by 161px == active area losing exactly 161px),
+     so that part of the photo is reused as-is when expanded too. Only
+     the autopilot+left-border column (x0-215 when expanded) needs a
+     second photo -- #ap-photo below layers
+     Screenshot_20250713_103638_B&G-crop.jpg (215x600, autopilot
+     expanded) on top of exactly that column when apExpanded is true. */
+  #screen {
+    width: 1024px;
+    height: 600px;
+    position: relative;
+    background: #000 url("Screenshot_20250713_104954_B&G-crop.jpg") no-repeat;
+    background-size: 1024px 600px;
+    border-radius: 6px;
+    box-shadow: 0 8px 30px rgba(0, 0, 0, 0.35);
+    overflow: hidden;
+  }
+  #ap-photo {
+    position: absolute;
+    top: 0;
+    left: 0;
+    width: 0;
+    height: 600px;
+    background: url("Screenshot_20250713_103638_B&G-crop.jpg") top left / 215px 600px no-repeat;
+    pointer-events: none;
+  }
+  #chrome-strip {
+    height: 26px;
+    display: flex;
+    align-items: center;
+    padding: 0 10px;
+    font-size: 11px;
+    color: #ccc;
+    font-family: monospace;
+    text-shadow: 0 1px 2px #000;
+  }
+  #body-row {
+    height: 574px;
+    display: flex;
+    line-height: 0;
+  }
+  #ap-pane {
+    flex: none;
+    cursor: pointer;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    user-select: none;
+  }
+  #ap-pane:hover { background: rgba(255, 255, 255, 0.15); }
+  #ap-pane span {
+    writing-mode: vertical-rl;
+    transform: rotate(180deg);
+    color: #fff;
+    font-size: 12px;
+    font-family: -apple-system, "Segoe UI", Roboto, sans-serif;
+    letter-spacing: 0.02em;
+    line-height: 1.4;
+    white-space: nowrap;
+    text-shadow: 0 1px 3px #000, 0 0 6px #000;
+  }
+  .border {
+    flex: none;
+  }
+  #active-row {
+    flex: none;
+    display: flex;
+  }
+  .pane-divider {
+    flex: none;
+    background: #000;
+  }
+  iframe {
+    display: block;
+    border: none;
+    height: 574px;
+  }
+  #void-pane {
+    /* Nothing mounted -- stays fully transparent so the reference
+       photo underneath (#screen's background) shows through as-is,
+       standing in for the MFD's own native content in that pane. */
+    flex: none;
+    height: 574px;
+  }
+  #data-pane {
+    flex: none;
+    width: 160px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+  }
+  #data-pane span {
+    color: #fff;
+    font-size: 13px;
+    font-family: -apple-system, "Segoe UI", Roboto, sans-serif;
+    text-shadow: 0 1px 3px #000, 0 0 6px #000;
+  }
+  #dims {
+    font-family: monospace;
+    font-size: 12px;
+    color: #45454a;
+    margin-top: 10px;
+  }
+  #zoom-warning {
+    font-size: 0.8em;
+    color: #a05a00;
+    margin-left: auto;
+  }
+</style>
+</head>
+<body>
+  <div id="toolbar">
+    <h1>Zeus3 7 preview simulator</h1>
+    <div class="btn-group" role="group" aria-label="Autopilot state">
+      <button class="btn" id="ap-collapsed-btn" type="button">Autopilot collapsed</button>
+      <button class="btn" id="ap-expanded-btn" type="button">Autopilot expanded</button>
+    </div>
+    <div class="btn-group" role="group" aria-label="Pane count">
+      <button class="btn" id="pane0-btn" type="button" title="Just for fun">0 panes</button>
+      <button class="btn" id="pane1-btn" type="button">1 pane</button>
+      <button class="btn" id="pane2-btn" type="button">2 panes</button>
+    </div>
+    <label>target <input type="text" id="target-url" title="Base URL of the running app -- defaults to this page's own origin, editable to point elsewhere (e.g. the boat's Pi)"></label>
+    <button id="reload-btn" title="Reload the iframe(s) (new page load, fresh poll state)">&#8635; reload</button>
+    <span id="zoom-warning">Pixel-accurate only at 100% browser zoom.</span>
+  </div>
+
+  <div id="stage">
+    <div id="screen">
+      <div id="chrome-strip">Zeus3 7 — 1024&times;600, 26px chrome</div>
+      <div id="body-row">
+        <div id="ap-pane"><span>expand/contract autopilot</span></div>
+        <div class="border" id="border-l"></div>
+        <div id="active-row"></div>
+        <div class="border" id="border-r"></div>
+        <div id="data-pane"><span>data</span></div>
+      </div>
+      <div id="ap-photo"></div>
+    </div>
+  </div>
+  <div id="dims"></div>
+
+  <script>
+    // Derived model from mfd_display_notes-zeus3-7.md -- only ACTIVE
+    // is hardware-measured (window.innerWidth beacon); AP_TOGGLE,
+    // AP_PANEL, BORDER_*, and DATA are on-screen visual estimates that
+    // close the 1024px budget exactly for all four states.
+    const HEIGHT = 574;
+    const AP_COLLAPSED = 48;
+    const AP_EXPANDED = 48 + 160;
+    const DATA = 160;
+    const ACTIVE = {
+      collapsed: { single: 803, paneA: 398, divider: 7, paneB: 398 },
+      expanded: { single: 642, paneA: 318, divider: 6, paneB: 318 },
+    };
+    const BORDER_L = { collapsed: 6, expanded: 7 };
+    const BORDER_R = 7;
+
+    const STATE_KEY = 'vbp.mfdPreview.state';
+    const TARGET_KEY = 'vbp.mfdPreview.targetUrl';
+
+    const apPane = document.getElementById('ap-pane');
+    const borderL = document.getElementById('border-l');
+    const borderR = document.getElementById('border-r');
+    const apPhoto = document.getElementById('ap-photo');
+    const activeRow = document.getElementById('active-row');
+    const dims = document.getElementById('dims');
+    const targetInput = document.getElementById('target-url');
+
+    let apExpanded = false;
+    let paneCount = 1;
+
+    function getTarget() {
+      // Same-origin default: this harness is normally served by the same
+      // app it previews (webapp/dev/), but the field stays editable to
+      // point at a different host (e.g. the boat's Pi) if needed.
+      return localStorage.getItem(TARGET_KEY) || window.location.origin;
+    }
+
+    function makeIframe(width) {
+      const f = document.createElement('iframe');
+      f.style.width = `${width}px`;
+      f.title = 'app preview';
+      f.src = getTarget();
+      return f;
+    }
+
+    function render() {
+      const key = apExpanded ? 'expanded' : 'collapsed';
+      const active = ACTIVE[key];
+
+      apPane.style.width = `${apExpanded ? AP_EXPANDED : AP_COLLAPSED}px`;
+      borderL.style.width = `${BORDER_L[key]}px`;
+      borderR.style.width = `${BORDER_R}px`;
+      // Only the expanded state has its own reference photo (215x600,
+      // autopilot panel + left border) -- collapsed relies on the base
+      // 1024x600 photo, which is already correct for that column.
+      apPhoto.style.width = apExpanded ? `${AP_EXPANDED + BORDER_L.expanded}px` : '0';
+
+      activeRow.innerHTML = '';
+      let summary;
+      if (paneCount === 0) {
+        const voidPane = document.createElement('div');
+        voidPane.id = 'void-pane';
+        voidPane.style.width = `${active.single}px`;
+        activeRow.appendChild(voidPane);
+        summary = `active ${active.single}px (0 panes -- reference photo showing through)`;
+      } else if (paneCount === 1) {
+        activeRow.appendChild(makeIframe(active.single));
+        summary = `active ${active.single}px (1 pane)`;
+      } else {
+        activeRow.appendChild(makeIframe(active.paneA));
+        const div = document.createElement('div');
+        div.className = 'pane-divider';
+        div.style.width = `${active.divider}px`;
+        activeRow.appendChild(div);
+        activeRow.appendChild(makeIframe(active.paneB));
+        summary = `active ${active.paneA}+${active.divider}+${active.paneB}px (2 panes)`;
+      }
+
+      document.getElementById('ap-collapsed-btn').classList.toggle('active', !apExpanded);
+      document.getElementById('ap-expanded-btn').classList.toggle('active', apExpanded);
+      document.getElementById('pane0-btn').classList.toggle('active', paneCount === 0);
+      document.getElementById('pane1-btn').classList.toggle('active', paneCount === 1);
+      document.getElementById('pane2-btn').classList.toggle('active', paneCount === 2);
+
+      dims.textContent =
+        `autopilot ${apPane.style.width} (${key}) · ${summary} · data ${DATA}px · ` +
+        `total 1024×${HEIGHT + 26} at 100% zoom`;
+
+      localStorage.setItem(STATE_KEY, JSON.stringify({ apExpanded, paneCount }));
+    }
+
+    function reload() {
+      const url = targetInput.value.trim() || window.location.origin;
+      localStorage.setItem(TARGET_KEY, url);
+      activeRow.querySelectorAll('iframe').forEach((f) => { f.src = url; });
+    }
+
+    apPane.addEventListener('click', () => { apExpanded = !apExpanded; render(); });
+    document.getElementById('ap-collapsed-btn').addEventListener('click', () => { apExpanded = false; render(); });
+    document.getElementById('ap-expanded-btn').addEventListener('click', () => { apExpanded = true; render(); });
+    document.getElementById('pane0-btn').addEventListener('click', () => { paneCount = 0; render(); });
+    document.getElementById('pane1-btn').addEventListener('click', () => { paneCount = 1; render(); });
+    document.getElementById('pane2-btn').addEventListener('click', () => { paneCount = 2; render(); });
+    document.getElementById('reload-btn').addEventListener('click', reload);
+    targetInput.addEventListener('change', reload);
+
+    targetInput.value = getTarget();
+    try {
+      const saved = JSON.parse(localStorage.getItem(STATE_KEY) || '{}');
+      apExpanded = Boolean(saved.apExpanded);
+      paneCount = [0, 1, 2].includes(saved.paneCount) ? saved.paneCount : 1;
+    } catch (e) { /* ignore malformed saved state */ }
+    render();
+  </script>
+</body>
+</html>

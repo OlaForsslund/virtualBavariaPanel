@@ -30,7 +30,10 @@ and/or
 ## Running it
 
 
-To run it simulated for development, see `dev-environment.md`.
+To run it simulated for development (after `./setup_venv.sh`), run
+`./run_simulated.sh` — one command instead of three terminals. See
+`dev-environment.md` for what it's running and the manual per-terminal
+version if you want to drive each piece separately.
 
 To try it against your own real bus without the full deployment below,
 run `./run_hardware.sh` (after `./setup_venv.sh`) — it brings up `can0`

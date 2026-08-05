@@ -83,6 +83,7 @@ def main() -> None:
     cfg = load_config()
     logging.basicConfig(level=cfg.log_level, format="%(asctime)s %(name)s %(message)s")
     log.info("panel_sim (node 11) on %s/%s", cfg.can_interface, cfg.can_channel)
+    log.info("available relays: %s", ", ".join(sorted(constants.RELAYS)))
     with can.Bus(interface=cfg.can_interface, channel=cfg.can_channel) as bus:
         sim = PanelSim(bus, cfg.stream_period, parse_state(args.state))
         threading.Thread(target=button_cli, args=(sim.core,), daemon=True).start()

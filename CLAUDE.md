@@ -226,3 +226,11 @@ ever needs to matter for bandwidth.
    the single source of truth in every run mode. Not yet applied — user
    wanted to commit other pending changes first and investigate something
    else before circling back.
+5. **Document the MFD's exact `navigator.userAgent` string next time on the
+   boat.** The 2026-07-25 diagnostics beacon captured it live but the value
+   itself was never recorded anywhere (only paraphrased here as
+   `QtWebEngine/5.12.9`, Chromium 69) — worth pinning down verbatim for
+   future ES-compatibility checks.
+   Also suggest we take screenshots on the device to get the actual
+   look of the different configurations. 
+
