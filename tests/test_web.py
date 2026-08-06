@@ -5,15 +5,17 @@ from fastapi.testclient import TestClient
 from gateway.command_queue import CommandQueue
 from gateway.constants import RELAYS
 from gateway.runtime import StatusBuffer, StatusSnapshot
+from gateway.storage import Storage
 from gateway.web import create_app
 
 
 class StubRuntime:
     """Only what web.py touches — a real GatewayRuntime needs a live CAN bus."""
 
-    def __init__(self) -> None:
+    def __init__(self, tmp_path=None) -> None:
         self.status_buffer = StatusBuffer()
         self.command_queue = CommandQueue()
+        self.storage = Storage(tmp_path) if tmp_path is not None else None
         self.circuit_calls: list[tuple[int, bool]] = []
 
     def cmd_set_circuit(self, mask: int, on: bool) -> None:
@@ -113,3 +115,47 @@ def test_post_system_restart_shells_out_to_systemctl_reboot():
 
     assert resp.status_code == 202
     mock_popen.assert_called_once_with(["sudo", "systemctl", "reboot"])
+
+
+def test_get_config_is_empty_dict_before_anything_saved(tmp_path):
+    client = TestClient(create_app(StubRuntime(tmp_path)))
+
+    assert client.get("/config").json() == {}
+
+
+def test_put_config_then_get_round_trips(tmp_path):
+    client = TestClient(create_app(StubRuntime(tmp_path)))
+
+    put_resp = client.put("/config", json={"visible_circuits": ["ANCHOR"]})
+
+    assert put_resp.status_code == 200
+    assert client.get("/config").json() == {"visible_circuits": ["ANCHOR"]}
+
+
+def test_index_html_has_no_cache_header():
+    client = TestClient(create_app(StubRuntime()))
+
+    resp = client.get("/")
+
+    assert resp.headers["cache-control"] == "no-cache"
+
+
+def test_static_asset_is_not_given_a_no_cache_header():
+    client = TestClient(create_app(StubRuntime()))
+
+    resp = client.get("/manifest.json")
+
+    assert "cache-control" not in resp.headers
+
+
+def test_post_diagnostics_is_logged_with_client_ip(tmp_path):
+    runtime = StubRuntime(tmp_path)
+    client = TestClient(create_app(runtime))
+
+    resp = client.post("/diagnostics", json={"user_agent": "test-agent"})
+
+    assert resp.status_code == 202
+    lines = runtime.storage.diagnostics_path.read_text().splitlines()
+    assert len(lines) == 1
+    assert '"user_agent": "test-agent"' in lines[0]
+    assert '"client_ip"' in lines[0]

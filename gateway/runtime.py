@@ -17,6 +17,7 @@ import logging
 import threading
 import time
 from dataclasses import dataclass
+from pathlib import Path
 
 import can
 import canopen
@@ -28,6 +29,7 @@ from gateway.config import Config
 from gateway.frames import decode_state, encode_state
 from gateway.monitor import BusMonitor
 from gateway.state_machine import PASSIVE, DEACTIVATING, Action, GatewayStateMachine
+from gateway.storage import Storage
 from gateway.web import create_app
 
 log = logging.getLogger("gateway")
@@ -153,6 +155,7 @@ class GatewayRuntime:
         self.status_buffer = StatusBuffer()
         self.sensor_buffer = SensorBuffer()
         self.command_queue = CommandQueue()
+        self.storage = Storage(Path(cfg.data_dir))
         self._logged_state = self.sm.state
         self._shutdown = threading.Event()
         self._publish_buffers()  # so GET /status has something before the first frame/tick

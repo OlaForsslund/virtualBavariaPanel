@@ -163,7 +163,11 @@
   </section>
 
   <section id="view-diagnostics" class="view">
-    <p id="diag-status">state: loading&hellip;</p>
+    <header id="top-bar">
+      <button class="action-btn" onclick="sendDiagnostics()">Send diagnostics</button>
+      <button class="action-btn" onclick="hardReload()">Reload</button>
+    </header>
+    <p id="diag-send-status"></p>
     <p>Reports live — resize/split the MFD screen and watch these change.</p>
     <table class="diag">
       <tr><td>window.innerWidth &times; innerHeight</td><td id="d-window"></td></tr>
@@ -174,16 +178,16 @@
       <tr><td>sessionStorage</td><td id="d-sessionstorage"></td></tr>
       <tr><td>userAgent</td><td id="d-ua"></td></tr>
     </table>
+    <p id="diag-status">state: loading&hellip;</p>
   </section>
 
   <section id="view-config" class="view">
     <header id="top-bar">
-      <button class="action-btn" onclick="location.reload(true)">Reload &amp; send diagnostics</button>
+      <button class="action-btn" onclick="location.hash='diagnostics'">Diagnostics</button>
       <button class="action-btn danger" onclick="restartPi()">Restart Pi</button>
     </header>
     <p>Choose which circuits show on the Control view.</p>
     <div id="config-list">loading&hellip;</div>
-    <p><button class="action-btn" onclick="location.hash='diagnostics'">Diagnostics</button></p>
   </section>
 
   <script>
@@ -205,6 +209,21 @@
     });
     showView(location.hash.slice(1) || 'essentials');
 
+    // -- top bar: hard reload --
+    // location.reload(true)'s force-bypass-cache argument has been a no-op
+    // in Chrome since long before this MFD's 2018-era QtWebEngine build, and
+    // index.html is served with no Cache-Control header (see gateway/web.py
+    // for the no-cache header added there as a second layer) -- a plain
+    // reload can silently keep serving whatever the browser's disk cache
+    // has. A cache-busting query param forces a genuinely new URL, which no
+    // cache can have a stored entry for. Preserves the existing hash/query
+    // (mfd_name etc., mfd_display_notes-zeus3-7.md) via the URL object.
+    function hardReload() {
+      const url = new URL(location.href);
+      url.searchParams.set('_r', Date.now());
+      location.href = url.toString();
+    }
+
     // -- top bar: Restart Pi --
     async function restartPi() {
       if (!confirm('Restart the Raspberry Pi now? Control drops back to the panel and it takes about a minute to come back online.')) return;
@@ -216,7 +235,9 @@
       alert('Restart requested — back online in about a minute.');
     }
 
-    // -- config: which circuits are visible on Control, persisted in localStorage --
+    // -- config: which circuits are visible on Control, persisted server-side
+    // (GET/PUT /config) with localStorage as an instant local cache so
+    // rendering never has to wait on a round trip.
     const VISIBLE_KEY = 'vbp.visibleCircuits';
     let lastStatus = null; // last full status we rendered from, for instant config-change re-renders
 
@@ -228,17 +249,45 @@
         return null; // localStorage unavailable -> just show everything
       }
     }
-    function setVisibleSet(set) {
+    function cacheVisibleSet(set) {
       try {
         localStorage.setItem(VISIBLE_KEY, JSON.stringify([...set]));
       } catch (err) {
-        // can't persist here; Config checkboxes still work for this page load
+        // can't cache locally; still persisted server-side below
       }
-      if (lastStatus) renderControl(lastStatus); // re-render now, don't wait for the next poll
+    }
+    async function setVisibleSet(set) {
+      cacheVisibleSet(set);
+      if (lastStatus) renderControl(lastStatus); // re-render now, don't wait for the network
+      try {
+        await fetch('/config', {
+          method: 'PUT',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ visible_circuits: [...set] }),
+        });
+      } catch (err) {
+        // server unreachable -- local cache above still covers this session
+      }
     }
     function isVisible(name) {
       const set = getVisibleSet();
       return set === null || set.has(name);
+    }
+
+    // Seed the local cache from the server before the first render, so a
+    // fresh browser/device (or one whose localStorage got cleared) picks up
+    // previously saved visibility instead of defaulting to "show all".
+    async function seedVisibleSetFromServer() {
+      try {
+        const resp = await fetch('/config');
+        if (!resp.ok) return;
+        const config = await resp.json();
+        if (Array.isArray(config.visible_circuits)) {
+          cacheVisibleSet(new Set(config.visible_circuits));
+        }
+      } catch (err) {
+        // stay on whatever localStorage already has
+      }
     }
 
     let configRendered = false;
@@ -386,7 +435,7 @@
       }
       setTimeout(poll, POLL_MS);
     }
-    poll();
+    seedVisibleSetFromServer().then(poll);
 
     // -- diagnostics: live window/screen/storage report --
     function testStorage(storage) {
@@ -410,6 +459,38 @@
     window.addEventListener('resize', renderDiagnostics);
     document.addEventListener('visibilitychange', renderDiagnostics);
     renderDiagnostics();
+
+    // Lives on the Diagnostics view itself (not Config) so you can watch the
+    // numbers and get on-screen confirmation that a press actually landed,
+    // in the same place you're comparing MFD split layouts. Not bundled
+    // with a reload -- resize already re-renders this table live (listener
+    // above), and reload is its own separate button for whatever cases it
+    // still turns out to matter for (see CLAUDE.md 2026-08-06).
+    async function sendDiagnostics() {
+      const statusEl = document.getElementById('diag-send-status');
+      statusEl.textContent = 'sending…';
+      try {
+        const resp = await fetch('/diagnostics', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            window: { width: window.innerWidth, height: window.innerHeight },
+            screen: { width: screen.width, height: screen.height },
+            device_pixel_ratio: window.devicePixelRatio,
+            visibility_state: document.visibilityState,
+            user_agent: navigator.userAgent,
+            local_storage: testStorage(window.localStorage),
+            session_storage: testStorage(window.sessionStorage),
+            url: location.href,
+          }),
+        });
+        statusEl.textContent = resp.ok
+          ? `sent at ${new Date().toLocaleTimeString()}`
+          : `send failed: HTTP ${resp.status}`;
+      } catch (err) {
+        statusEl.textContent = `send failed: ${err.message}`;
+      }
+    }
     document.getElementById('d-localstorage').textContent = testStorage(window.localStorage);
     document.getElementById('d-sessionstorage').textContent = testStorage(window.sessionStorage);
   </script>

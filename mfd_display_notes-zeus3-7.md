@@ -38,17 +38,24 @@ lets you size mockups without the physical MFD in hand.
 
 - Physical screen: **1024 × 600** (`screen.width`/`screen.height`,
   constant regardless of app layout).
-- MFD chrome overhead is a constant **26px of height** — every observed
-  viewport was exactly 574px tall regardless of split layout, so the
-  MFD's own UI (status bar etc.) always eats the same vertical strip.
-- Observed viewport **widths** (`window.innerWidth`), heights all 574px.
-  There's also a collapsible autopilot pane, permanently docked to the
-  left of the MFD's whole screen (separate from this app's own
-  split-pane layout); "active area" below means whatever's left after
-  the autopilot pane and other static MFD chrome. These four widths are
-  a clean 2×2 grid — {app full-screen vs. app split into two panes} ×
-  {autopilot collapsed vs. expanded} — not three-pane variants as
-  previously guessed here:
+- MFD chrome overhead is a constant **26px of height**.
+- The app area can be split in half vertically and horizontally for up to
+  4 simultaneous views. In addition, the autopilot pane can enter from the
+  left, further limiting the available horizontal space.
+- Full viewport is 574px tall. When split, it becomes 284px tall (borders
+  eat the rest).
+- It's possible to make other split ratios, but we won't design for those
+  when testing layouts.
+- Along the horizontal axis, the regions are:
+
+  | Region | Width | Notes |
+  |---|---|---|
+  | Sidebar/borders | 50px | fixed |
+  | Autopilot pane | 0–161px | collapsible to 0 |
+  | App area | remainder | splittable, up to 4 panes |
+  | Data pane/borders | 171px | fixed |
+
+- Table below shows effective horizontal viewports
 
   | Width | Autopilot pane | App layout |
   |-------|----------------|------------|
@@ -65,8 +72,14 @@ lets you size mockups without the physical MFD in hand.
 
 ## Design takeaway
 
-Design the Control view to remain usable down to **~318px wide** (worst
-observed split), at a fixed **574px** tall. No HiDPI concerns. Avoid
-ES2020+ syntax (`??`, `?.`) anywhere in shipped code — this MFD's
+Design the Control view to remain usable down to **~318px wide, ~284px
+tall** (worst-case quarter split, autopilot expanded). No HiDPI concerns.
+Avoid ES2020+ syntax (`??`, `?.`) anywhere in shipped code — this MFD's
 browser will silently fail to parse the *entire* `<script>` block if it
 hits one.
+
+At quarter size, usability is inherently limited — screen real estate and
+finger size don't shrink with the layout. Don't try to cram full
+functionality in there; favor a reduced/essentials-only view (as Control
+already does with its separate Essentials tab) over squeezing every
+control into a quarter pane.

@@ -13,7 +13,7 @@ import subprocess
 from pathlib import Path
 from typing import TYPE_CHECKING
 
-from fastapi import FastAPI, HTTPException
+from fastapi import FastAPI, HTTPException, Request
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel
 
@@ -73,6 +73,21 @@ def create_app(runtime: GatewayRuntime) -> FastAPI:
         runtime.command_queue.submit(lambda: runtime.cmd_set_circuit(mask, command.on))
         return {"circuit": name, "requested": command.on}
 
+    @app.get("/config")
+    def get_webapp_config() -> dict:
+        return runtime.storage.load_config()
+
+    @app.put("/config")
+    def set_webapp_config(config: dict) -> dict:
+        runtime.storage.save_config(config)
+        return config
+
+    @app.post("/diagnostics", status_code=202)
+    def post_diagnostics(report: dict, request: Request) -> dict:
+        client_ip = request.client.host if request.client else None
+        runtime.storage.log_diagnostics(report, client_ip)
+        return {"status": "logged"}
+
     @app.post("/system/restart", status_code=202)
     def restart_system() -> dict:
         # Fire-and-forget, non-blocking: `systemctl reboot` returns once the
@@ -81,6 +96,19 @@ def create_app(runtime: GatewayRuntime) -> FastAPI:
         # sudo on this box already (deploy prerequisite, not set up here).
         subprocess.Popen(["sudo", "systemctl", "reboot"])
         return {"status": "restarting"}
+
+    @app.middleware("http")
+    async def no_cache_html(request: Request, call_next):
+        # StaticFiles sends no Cache-Control at all (only ETag/Last-Modified),
+        # which lets browsers heuristically cache index.html and silently
+        # keep serving a stale copy after a deploy -- caught on the MFD
+        # 2026-08-06, where its "Reload" button appeared to do nothing.
+        # Static assets (images, manifest) are fine to cache normally, so
+        # this only touches HTML responses.
+        response = await call_next(request)
+        if response.headers.get("content-type", "").startswith("text/html"):
+            response.headers["Cache-Control"] = "no-cache"
+        return response
 
     # Serves the webapp directly so `gateway.main --activate` alone is enough
     # to try it out — the full boat deployment fronts this with lighttpd

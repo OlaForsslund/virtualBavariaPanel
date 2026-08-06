@@ -2,6 +2,9 @@
 
 import os
 from dataclasses import dataclass
+from pathlib import Path
+
+REPO_ROOT = Path(__file__).resolve().parent.parent.parent
 
 
 @dataclass(frozen=True)
@@ -13,6 +16,7 @@ class Config:
     web_port: int
     log_level: str
     stream_period: float  # seconds between 0x18C frames while active
+    data_dir: str  # webapp config + diagnostics reports (gateway/storage.py)
 
 
 def load_config(env=os.environ) -> Config:
@@ -25,4 +29,5 @@ def load_config(env=os.environ) -> Config:
         log_level=env.get("VBP_LOG_LEVEL", "INFO").upper(),
         # Panel cadence measured on hardware 2026-07-19: 25 ms.
         stream_period=int(env.get("VBP_STREAM_PERIOD_MS", "25")) / 1000,
+        data_dir=env.get("VBP_DATA_DIR", str(REPO_ROOT / "var")),
     )
