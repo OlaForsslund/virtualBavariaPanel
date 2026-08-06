@@ -23,7 +23,7 @@ import can
 import canopen
 import uvicorn
 
-from gateway import constants
+from gateway import calibration, constants
 from gateway.command_queue import CommandQueue
 from gateway.config import Config
 from gateway.frames import decode_state, encode_state
@@ -129,8 +129,12 @@ class StatusBuffer:
 class SensorSnapshot:
     starter_voltage: float
     house_voltage: float
-    freshwater_pct: int
-    blackwater_pct: int
+    starter_raw: int  # kept alongside the converted volts so /calibration/battery
+    house_raw: int  # can compute a new factor without re-reading the bus
+    # "_level", not "_pct": a discrete rod/float step (0/25/50/75/100), not a
+    # true continuous percentage -- panel_od_map.md, gateway/calibration.py.
+    freshwater_level: int
+    blackwater_level: int
     read_at: float  # time.monotonic() of the read, so staleness is visible to callers
 
 
@@ -301,16 +305,22 @@ class GatewayRuntime:
                 self.panel_node.sdo.upload(constants.BATTERY_HOUSE_INDEX, constants.BATTERY_HOUSE_SUB)[:2],
                 "little",
             )
-            fresh_pct = self.panel_node.sdo.upload(constants.TANK_FRESHWATER_INDEX, constants.TANK_FRESHWATER_SUB)[0]
-            black_pct = self.panel_node.sdo.upload(constants.TANK_BLACKWATER_INDEX, constants.TANK_BLACKWATER_SUB)[0]
+            freshwater_level = self.panel_node.sdo.upload(constants.TANK_FRESHWATER_INDEX, constants.TANK_FRESHWATER_SUB)[0]
+            blackwater_level = self.panel_node.sdo.upload(constants.TANK_BLACKWATER_INDEX, constants.TANK_BLACKWATER_SUB)[0]
         except (canopen.SdoAbortedError, canopen.SdoCommunicationError) as exc:
             log.warning("sensor poll failed: %s", exc)
             return
+        # Re-read on every poll (not cached) so a calibration saved via
+        # POST /calibration/battery takes effect within one SENSOR_POLL_PERIOD,
+        # no restart needed.
+        cal = self.storage.load_config().get("calibration", {})
         self.sensor_buffer.snapshot = SensorSnapshot(
-            starter_voltage=round(starter_raw * constants.BATTERY_VOLTS_PER_COUNT, 2),
-            house_voltage=round(house_raw * constants.BATTERY_VOLTS_PER_COUNT, 2),
-            freshwater_pct=fresh_pct,
-            blackwater_pct=black_pct,
+            starter_voltage=calibration.battery_voltage(starter_raw, cal, "starter"),
+            house_voltage=calibration.battery_voltage(house_raw, cal, "house"),
+            starter_raw=starter_raw,
+            house_raw=house_raw,
+            freshwater_level=freshwater_level,
+            blackwater_level=blackwater_level,
             read_at=time.monotonic(),
         )
 

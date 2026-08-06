@@ -11,12 +11,13 @@ from __future__ import annotations
 
 import subprocess
 from pathlib import Path
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Literal
 
 from fastapi import FastAPI, HTTPException, Request
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel
 
+from gateway import calibration
 from gateway.constants import RELAYS
 
 if TYPE_CHECKING:
@@ -29,6 +30,11 @@ WEBAPP_DIR = Path(__file__).resolve().parent.parent / "webapp"
 
 class CircuitCommand(BaseModel):
     on: bool
+
+
+class BatteryCalibration(BaseModel):
+    channel: Literal["starter", "house"]
+    actual_voltage: float
 
 
 def create_app(runtime: GatewayRuntime) -> FastAPI:
@@ -56,12 +62,33 @@ def create_app(runtime: GatewayRuntime) -> FastAPI:
         snapshot = runtime.sensor_buffer.snapshot
         if snapshot is None:
             raise HTTPException(status_code=503, detail="sensors not read yet")
+        cal = runtime.storage.load_config().get("calibration", {})
         return {
             "starter_voltage": snapshot.starter_voltage,
             "house_voltage": snapshot.house_voltage,
-            "freshwater_pct": snapshot.freshwater_pct,
-            "blackwater_pct": snapshot.blackwater_pct,
+            # "_level", not "_pct": a discrete rod/float step (0/25/50/75/100),
+            # not a true continuous percentage -- see gateway/calibration.py.
+            "freshwater_level": snapshot.freshwater_level,
+            "blackwater_level": snapshot.blackwater_level,
+            # None (-> null) when that level hasn't been calibrated yet --
+            # the client falls back to showing the raw level only.
+            "freshwater_liters": calibration.tank_liters(snapshot.freshwater_level, cal, "freshwater"),
+            "blackwater_liters": calibration.tank_liters(snapshot.blackwater_level, cal, "blackwater"),
         }
+
+    @app.post("/calibration/battery")
+    def calibrate_battery(body: BatteryCalibration) -> dict:
+        snapshot = runtime.sensor_buffer.snapshot
+        if snapshot is None:
+            raise HTTPException(status_code=503, detail="sensors not read yet")
+        raw = snapshot.starter_raw if body.channel == "starter" else snapshot.house_raw
+        if raw == 0:
+            raise HTTPException(status_code=422, detail="raw reading is zero, cannot calibrate")
+        factor = body.actual_voltage / raw
+        config = runtime.storage.load_config()
+        config.setdefault("calibration", {})[calibration.BATTERY_FACTOR_KEYS[body.channel]] = factor
+        runtime.storage.save_config(config)
+        return {"channel": body.channel, "raw": raw, "factor": factor}
 
     @app.post("/circuits/{name}", status_code=202)
     def set_circuit(name: str, command: CircuitCommand) -> dict:
@@ -79,8 +106,14 @@ def create_app(runtime: GatewayRuntime) -> FastAPI:
 
     @app.put("/config")
     def set_webapp_config(config: dict) -> dict:
-        runtime.storage.save_config(config)
-        return config
+        # Shallow-merges at the top level rather than replacing the whole
+        # document: config now holds independent sections (visible_circuits,
+        # calibration, ...), and a full replace lets a write to one silently
+        # wipe another whenever the caller doesn't also resend it.
+        current = runtime.storage.load_config()
+        current.update(config)
+        runtime.storage.save_config(current)
+        return current
 
     @app.post("/diagnostics", status_code=202)
     def post_diagnostics(report: dict, request: Request) -> dict:

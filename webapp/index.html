@@ -186,8 +186,55 @@
       <button class="action-btn" onclick="location.hash='diagnostics'">Diagnostics</button>
       <button class="action-btn danger" onclick="restartPi()">Restart Pi</button>
     </header>
+    <p><button class="action-btn" onclick="location.hash='relays'">Circuit visibility</button></p>
+    <p><button class="action-btn" onclick="location.hash='sensor-calibration'">Sensor calibration</button></p>
+  </section>
+
+  <section id="view-relays" class="view">
+    <p><button class="action-btn" onclick="location.hash='config'">&larr; Settings</button></p>
     <p>Choose which circuits show on the Control view.</p>
     <div id="config-list">loading&hellip;</div>
+  </section>
+
+  <section id="view-sensor-calibration" class="view">
+    <p><button class="action-btn" onclick="location.hash='config'">&larr; Settings</button></p>
+
+    <h3>Tank levels</h3>
+    <p>Enter the liters measured at each sensor step (the sender only
+      reports these fixed steps, not a smooth reading). Leave a level
+      blank to show % for it instead of L.</p>
+    <p>
+      <strong>Freshwater (L)</strong><br>
+      0%: <input type="number" id="cal-freshwater-0" size="6">
+      25%: <input type="number" id="cal-freshwater-25" size="6">
+      50%: <input type="number" id="cal-freshwater-50" size="6">
+      75%: <input type="number" id="cal-freshwater-75" size="6">
+      100%: <input type="number" id="cal-freshwater-100" size="6">
+    </p>
+    <p>
+      <strong>Blackwater (L)</strong><br>
+      0%: <input type="number" id="cal-blackwater-0" size="6">
+      25%: <input type="number" id="cal-blackwater-25" size="6">
+      50%: <input type="number" id="cal-blackwater-50" size="6">
+      75%: <input type="number" id="cal-blackwater-75" size="6">
+      100%: <input type="number" id="cal-blackwater-100" size="6">
+    </p>
+    <p><button class="action-btn" onclick="saveTankLevels()">Save</button></p>
+    <p id="cal-tank-status"></p>
+
+    <h3>Battery voltage</h3>
+    <p>Measure with a multimeter, enter the actual voltage, then calibrate.</p>
+    <p>
+      Starter: <span id="cal-starter-voltage">&mdash;</span>
+      <input type="number" step="0.01" id="cal-starter-actual" placeholder="actual V">
+      <button class="action-btn" onclick="calibrateBattery('starter')">Calibrate</button>
+    </p>
+    <p>
+      House: <span id="cal-house-voltage">&mdash;</span>
+      <input type="number" step="0.01" id="cal-house-actual" placeholder="actual V">
+      <button class="action-btn" onclick="calibrateBattery('house')">Calibrate</button>
+    </p>
+    <p id="cal-battery-status"></p>
   </section>
 
   <script>
@@ -274,10 +321,17 @@
       return set === null || set.has(name);
     }
 
+    // Senders report one of these fixed steps, never anything in between
+    // (rod/float type, not continuous) -- matches gateway/calibration.py.
+    const TANK_NAMES = ['freshwater', 'blackwater'];
+    const TANK_LEVELS = [0, 25, 50, 75, 100];
+
     // Seed the local cache from the server before the first render, so a
     // fresh browser/device (or one whose localStorage got cleared) picks up
     // previously saved visibility instead of defaulting to "show all".
-    async function seedVisibleSetFromServer() {
+    // Also pre-fills the Sensor calibration form's per-level tank fields --
+    // one GET /config covers both, no point fetching it twice at startup.
+    async function seedConfigFromServer() {
       try {
         const resp = await fetch('/config');
         if (!resp.ok) return;
@@ -285,8 +339,74 @@
         if (Array.isArray(config.visible_circuits)) {
           cacheVisibleSet(new Set(config.visible_circuits));
         }
+        const cal = config.calibration || {};
+        for (const tank of TANK_NAMES) {
+          const levels = cal[`${tank}_levels_l`] || {};
+          for (const level of TANK_LEVELS) {
+            if (levels[level] !== undefined) {
+              document.getElementById(`cal-${tank}-${level}`).value = levels[level];
+            }
+          }
+        }
       } catch (err) {
-        // stay on whatever localStorage already has
+        // stay on whatever localStorage already has; calibration form is
+        // just left blank
+      }
+    }
+
+    // Tank levels live under config.calibration alongside the battery
+    // factors that POST /calibration/battery writes -- read-merge-write so
+    // saving one doesn't wipe the other (PUT /config only merges at the top
+    // level, not inside nested objects; see gateway/web.py 2026-08-06). Each
+    // level is a direct liters value, not a capacity to scale by -- the
+    // tank's cross-section isn't uniform, so there's no math to do here.
+    async function saveTankLevels() {
+      const statusEl = document.getElementById('cal-tank-status');
+      statusEl.textContent = 'saving…';
+      try {
+        const resp = await fetch('/config');
+        const config = resp.ok ? await resp.json() : {};
+        const cal = config.calibration || {};
+        for (const tank of TANK_NAMES) {
+          const key = `${tank}_levels_l`;
+          const levels = cal[key] || {};
+          for (const level of TANK_LEVELS) {
+            const raw = document.getElementById(`cal-${tank}-${level}`).value;
+            if (raw === '') delete levels[level]; else levels[level] = parseFloat(raw);
+          }
+          cal[key] = levels;
+        }
+        await fetch('/config', {
+          method: 'PUT',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ calibration: cal }),
+        });
+        statusEl.textContent = `saved at ${new Date().toLocaleTimeString()}`;
+      } catch (err) {
+        statusEl.textContent = `save failed: ${err.message}`;
+      }
+    }
+
+    async function calibrateBattery(channel) {
+      const statusEl = document.getElementById('cal-battery-status');
+      const input = document.getElementById(`cal-${channel}-actual`);
+      const actualVoltage = parseFloat(input.value);
+      if (!actualVoltage) {
+        statusEl.textContent = 'enter the measured voltage first';
+        return;
+      }
+      statusEl.textContent = 'calibrating…';
+      try {
+        const resp = await fetch('/calibration/battery', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ channel, actual_voltage: actualVoltage }),
+        });
+        statusEl.textContent = resp.ok
+          ? `${channel} calibrated at ${new Date().toLocaleTimeString()}`
+          : `calibration failed: HTTP ${resp.status}`;
+      } catch (err) {
+        statusEl.textContent = `calibration failed: ${err.message}`;
       }
     }
 
@@ -395,12 +515,22 @@
     const SENSOR_POLL_MS = 5000;
 
     function renderSensors(data) {
-      document.getElementById('gauge-fresh').style.width = `${data.freshwater_pct}%`;
-      document.getElementById('value-fresh').textContent = `${data.freshwater_pct}%`;
-      document.getElementById('gauge-black').style.width = `${data.blackwater_pct}%`;
-      document.getElementById('value-black').textContent = `${data.blackwater_pct}%`;
+      // data.*_level is a discrete rod/float step (0/25/50/75/100), not a
+      // true percentage -- still shown with a "%" suffix here since that's
+      // an intuitive display shorthand for a human, even though it isn't
+      // continuous (gateway/calibration.py).
+      document.getElementById('gauge-fresh').style.width = `${data.freshwater_level}%`;
+      document.getElementById('value-fresh').textContent =
+        data.freshwater_liters !== null ? `${data.freshwater_liters} L` : `${data.freshwater_level}%`;
+      document.getElementById('gauge-black').style.width = `${data.blackwater_level}%`;
+      document.getElementById('value-black').textContent =
+        data.blackwater_liters !== null ? `${data.blackwater_liters} L` : `${data.blackwater_level}%`;
       document.getElementById('value-starter').textContent = `${data.starter_voltage.toFixed(2)} V`;
       document.getElementById('value-house').textContent = `${data.house_voltage.toFixed(2)} V`;
+      // Sensor calibration page shows the same live voltage as reference
+      // while you're about to type in a multimeter reading next to it.
+      document.getElementById('cal-starter-voltage').textContent = `${data.starter_voltage.toFixed(2)} V`;
+      document.getElementById('cal-house-voltage').textContent = `${data.house_voltage.toFixed(2)} V`;
     }
 
     async function pollSensors() {
@@ -435,7 +565,7 @@
       }
       setTimeout(poll, POLL_MS);
     }
-    seedVisibleSetFromServer().then(poll);
+    seedConfigFromServer().then(poll);
 
     // -- diagnostics: live window/screen/storage report --
     function testStorage(storage) {

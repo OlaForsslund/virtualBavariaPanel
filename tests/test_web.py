@@ -4,7 +4,7 @@ from fastapi.testclient import TestClient
 
 from gateway.command_queue import CommandQueue
 from gateway.constants import RELAYS
-from gateway.runtime import StatusBuffer, StatusSnapshot
+from gateway.runtime import SensorBuffer, SensorSnapshot, StatusBuffer, StatusSnapshot
 from gateway.storage import Storage
 from gateway.web import create_app
 
@@ -14,6 +14,7 @@ class StubRuntime:
 
     def __init__(self, tmp_path=None) -> None:
         self.status_buffer = StatusBuffer()
+        self.sensor_buffer = SensorBuffer()
         self.command_queue = CommandQueue()
         self.storage = Storage(tmp_path) if tmp_path is not None else None
         self.circuit_calls: list[tuple[int, bool]] = []
@@ -132,6 +133,21 @@ def test_put_config_then_get_round_trips(tmp_path):
     assert client.get("/config").json() == {"visible_circuits": ["ANCHOR"]}
 
 
+def test_put_config_merges_rather_than_replacing_other_sections(tmp_path):
+    # Regression test: an earlier version replaced the whole document, so a
+    # write to one section (e.g. calibration) silently wiped another (e.g.
+    # visible_circuits) whenever the caller didn't resend it too.
+    client = TestClient(create_app(StubRuntime(tmp_path)))
+    client.put("/config", json={"visible_circuits": ["ANCHOR", "BILGE_PUMP"]})
+
+    resp = client.put("/config", json={"calibration": {"freshwater_levels_l": {"50": 69}}})
+
+    assert resp.status_code == 200
+    config = client.get("/config").json()
+    assert config["visible_circuits"] == ["ANCHOR", "BILGE_PUMP"]
+    assert config["calibration"] == {"freshwater_levels_l": {"50": 69}}
+
+
 def test_index_html_has_no_cache_header():
     client = TestClient(create_app(StubRuntime()))
 
@@ -146,6 +162,96 @@ def test_static_asset_is_not_given_a_no_cache_header():
     resp = client.get("/manifest.json")
 
     assert "cache-control" not in resp.headers
+
+
+def _sensor_snapshot(**overrides) -> SensorSnapshot:
+    defaults = dict(
+        starter_voltage=13.56,
+        house_voltage=13.2,
+        starter_raw=909,
+        house_raw=883,
+        freshwater_level=50,
+        blackwater_level=25,
+        read_at=0.0,
+    )
+    defaults.update(overrides)
+    return SensorSnapshot(**defaults)
+
+
+def test_get_sensors_before_first_reading_is_503(tmp_path):
+    client = TestClient(create_app(StubRuntime(tmp_path)))
+
+    resp = client.get("/sensors")
+
+    assert resp.status_code == 503
+
+
+def test_get_sensors_reports_liters_as_null_when_no_capacity_configured(tmp_path):
+    runtime = StubRuntime(tmp_path)
+    runtime.sensor_buffer.snapshot = _sensor_snapshot()
+    client = TestClient(create_app(runtime))
+
+    body = client.get("/sensors").json()
+
+    assert body["freshwater_level"] == 50
+    assert body["freshwater_liters"] is None
+    assert body["blackwater_liters"] is None
+
+
+def test_get_sensors_reports_liters_once_level_configured(tmp_path):
+    runtime = StubRuntime(tmp_path)
+    runtime.sensor_buffer.snapshot = _sensor_snapshot(freshwater_level=50)
+    runtime.storage.save_config({"calibration": {"freshwater_levels_l": {"50": 69}}})
+    client = TestClient(create_app(runtime))
+
+    body = client.get("/sensors").json()
+
+    assert body["freshwater_liters"] == 69.0
+    assert body["blackwater_liters"] is None
+
+
+def test_calibrate_battery_before_first_reading_is_503(tmp_path):
+    client = TestClient(create_app(StubRuntime(tmp_path)))
+
+    resp = client.post("/calibration/battery", json={"channel": "starter", "actual_voltage": 13.6})
+
+    assert resp.status_code == 503
+
+
+def test_calibrate_battery_computes_and_persists_factor(tmp_path):
+    runtime = StubRuntime(tmp_path)
+    runtime.sensor_buffer.snapshot = _sensor_snapshot(starter_raw=909)
+    client = TestClient(create_app(runtime))
+
+    resp = client.post("/calibration/battery", json={"channel": "starter", "actual_voltage": 13.6})
+
+    assert resp.status_code == 200
+    assert resp.json() == {"channel": "starter", "raw": 909, "factor": 13.6 / 909}
+    assert runtime.storage.load_config()["calibration"]["battery_volts_per_count_starter"] == 13.6 / 909
+
+
+def test_calibrate_battery_only_touches_its_own_channel(tmp_path):
+    runtime = StubRuntime(tmp_path)
+    runtime.sensor_buffer.snapshot = _sensor_snapshot(starter_raw=909, house_raw=883)
+    runtime.storage.save_config({"visible_circuits": ["ANCHOR"]})
+    client = TestClient(create_app(runtime))
+
+    client.post("/calibration/battery", json={"channel": "house", "actual_voltage": 13.2})
+
+    config = runtime.storage.load_config()
+    assert config["visible_circuits"] == ["ANCHOR"]
+    assert "battery_volts_per_count_starter" not in config["calibration"]
+    assert config["calibration"]["battery_volts_per_count_house"] == 13.2 / 883
+
+
+def test_calibrate_battery_rejects_zero_raw_reading(tmp_path):
+    runtime = StubRuntime(tmp_path)
+    runtime.sensor_buffer.snapshot = _sensor_snapshot(starter_raw=0)
+    client = TestClient(create_app(runtime))
+
+    resp = client.post("/calibration/battery", json={"channel": "starter", "actual_voltage": 13.6})
+
+    assert resp.status_code == 422
 
 
 def test_post_diagnostics_is_logged_with_client_ip(tmp_path):
