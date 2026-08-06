@@ -1,0 +1,505 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Freshwater Tank — Sensor Readout</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@400;500;600;700&family=IBM+Plex+Mono:wght@400;500;600&display=swap" rel="stylesheet">
+<style>
+  :root{
+    --bg: #061826;
+    --panel: #0E2B40;
+    --panel-light: #123249;
+    --brass: #C99A4B;
+    --brass-dim: #8C6B34;
+    --water-deep: #175577;
+    --water-light: #3FA9D6;
+    --paper: #E9EDE7;
+    --muted: #7C93A3;
+    --fault: #C9622F;
+    --marker-yellow: #FFCF40;
+  }
+
+  *{ box-sizing: border-box; }
+
+  body{
+    margin:0;
+    background:
+      radial-gradient(circle at 15% -10%, rgba(63,169,214,0.10), transparent 45%),
+      var(--bg);
+    color: var(--paper);
+    font-family: 'Space Grotesk', sans-serif;
+    padding: 32px 20px 60px;
+    min-height: 100vh;
+  }
+
+  .wrap{ max-width: 920px; margin: 0 auto; }
+
+  .eyebrow{
+    font-family: 'IBM Plex Mono', monospace;
+    font-size: 11px;
+    letter-spacing: 0.22em;
+    text-transform: uppercase;
+    color: var(--brass);
+    margin: 0 0 6px;
+  }
+
+  h1{
+    font-size: clamp(24px, 4vw, 34px);
+    font-weight: 700;
+    letter-spacing: -0.01em;
+    margin: 0 0 6px;
+  }
+
+  .sub{
+    color: var(--muted);
+    font-size: 14px;
+    max-width: 56ch;
+    line-height: 1.5;
+    margin: 0 0 34px;
+  }
+
+  .panel{
+    background: linear-gradient(180deg, var(--panel-light), var(--panel));
+    border: 1px solid rgba(201,154,75,0.25);
+    border-radius: 14px;
+    padding: 28px;
+    display: grid;
+    grid-template-columns: 220px 1fr;
+    gap: 36px;
+    box-shadow: 0 20px 50px -20px rgba(0,0,0,0.6), inset 0 1px 0 rgba(255,255,255,0.04);
+  }
+
+  @media (max-width: 640px){
+    .panel{ grid-template-columns: 1fr; }
+  }
+
+  /* ---- tank column ---- */
+  .tank-col{ display:flex; flex-direction:column; align-items:center; }
+
+  svg{ width: 100%; max-width: 210px; height:auto; overflow: visible; }
+
+  .fill-solid{ transition: y 500ms cubic-bezier(.4,0,.2,1), height 500ms cubic-bezier(.4,0,.2,1); }
+  .fill-uncertain{ transition: y 500ms cubic-bezier(.4,0,.2,1), height 500ms cubic-bezier(.4,0,.2,1), fill 300ms; }
+  .switch-dot{ transition: fill 300ms, stroke 300ms; }
+  #cylBaseCap{ transition: fill 300ms; }
+
+  .tank-caption{
+    font-family:'IBM Plex Mono', monospace;
+    font-size: 11px;
+    color: var(--muted);
+    letter-spacing: 0.05em;
+    margin-top: 14px;
+    text-align:center;
+  }
+
+  /* ---- readout column ---- */
+  .readout{ display:flex; flex-direction:column; gap:22px; }
+
+  .signal-row{
+    display:flex; align-items: baseline; gap: 14px; flex-wrap: wrap;
+  }
+
+  .signal-label{
+    font-family:'IBM Plex Mono', monospace;
+    font-size: 11px;
+    letter-spacing: 0.15em;
+    text-transform: uppercase;
+    color: var(--muted);
+  }
+
+  .signal-value{
+    font-family:'IBM Plex Mono', monospace;
+    font-size: 44px;
+    font-weight: 600;
+    color: var(--brass);
+    line-height: 1;
+  }
+
+  .status-pill{
+    font-family:'IBM Plex Mono', monospace;
+    font-size: 11px;
+    letter-spacing: 0.08em;
+    text-transform: uppercase;
+    padding: 5px 10px;
+    border-radius: 999px;
+    border: 1px solid currentColor;
+  }
+
+  .status-ok{ color: #6FCF97; }
+  .status-warn{ color: var(--fault); }
+
+  .interval-text{
+    font-size: 17px;
+    line-height: 1.5;
+    color: var(--paper);
+  }
+  .interval-text b{ color: var(--water-light); font-weight: 600; }
+  .interval-text .warn-inline{ color: var(--fault); font-weight: 600; }
+
+  /* view toggle */
+  .view-toggle{
+    display:flex; gap:6px; margin-bottom:16px;
+    background: rgba(255,255,255,0.03);
+    border: 1px solid rgba(201,154,75,0.2);
+    border-radius: 8px;
+    padding: 3px;
+  }
+  .view-btn{
+    flex:1;
+    font-family:'IBM Plex Mono', monospace;
+    font-size: 11px;
+    letter-spacing: 0.03em;
+    background: transparent;
+    color: var(--muted);
+    border: none;
+    border-radius: 6px;
+    padding: 7px 8px;
+    cursor: pointer;
+    transition: background 150ms, color 150ms;
+  }
+  .view-btn.active{ background: var(--brass); color: #1a1206; font-weight: 600; }
+  .view-btn:not(.active):hover{ color: var(--paper); }
+  .view-btn:focus-visible{ outline: 2px solid var(--water-light); outline-offset: 2px; }
+
+  .tank-view[hidden]{ display:none; }
+
+  /* buttons */
+  .btn-row{
+    display:flex; gap:8px; flex-wrap: wrap; margin-top: 4px;
+  }
+  button.lvl{
+    font-family:'IBM Plex Mono', monospace;
+    font-size: 13px;
+    letter-spacing: 0.02em;
+    background: rgba(255,255,255,0.03);
+    color: var(--paper);
+    border: 1px solid rgba(201,154,75,0.35);
+    border-radius: 8px;
+    padding: 9px 14px;
+    cursor: pointer;
+    transition: background 150ms, border-color 150ms, color 150ms;
+  }
+  button.lvl:hover{ border-color: var(--brass); }
+  button.lvl.active{
+    background: var(--brass);
+    border-color: var(--brass);
+    color: #1a1206;
+    font-weight: 600;
+  }
+  button.lvl:focus-visible{ outline: 2px solid var(--water-light); outline-offset: 2px; }
+
+  .note{
+    margin-top: 30px;
+    padding: 16px 18px;
+    border-left: 3px solid var(--brass-dim);
+    background: rgba(201,154,75,0.06);
+    font-size: 13px;
+    line-height: 1.55;
+    color: var(--muted);
+    border-radius: 0 8px 8px 0;
+  }
+  .note b{ color: var(--paper); }
+
+  @media (prefers-reduced-motion: reduce){
+    .fill-solid, .fill-uncertain, .switch-dot,
+    #cylFillSolid, #cylFillUncertain, #cylSurfaceSolid, #cylSurfaceUncertain, #cylBaseCap{ transition: none; }
+  }
+</style>
+</head>
+<body>
+<div class="wrap">
+  <p class="eyebrow">Freshwater System · Tank 1</p>
+  <h1>Sensor Readout</h1>
+  <p class="sub">This sensor only reports four fixed levels, so any reading is really the floor of a range — the true level could be anything from that point up to the next switch. Click a reading below to see what it actually tells you.</p>
+
+  <div class="panel">
+    <div class="tank-col">
+      <div class="view-toggle" role="tablist" aria-label="Tank illustration style">
+        <button class="view-btn" data-view="flat" type="button">Flat panel</button>
+        <button class="view-btn active" data-view="cyl" type="button">Cylinder</button>
+      </div>
+
+      <div id="flatView" class="tank-view" hidden>
+        <svg viewBox="-28 0 248 460" xmlns="http://www.w3.org/2000/svg">
+          <defs>
+            <pattern id="hatchWater" width="8" height="8" patternTransform="rotate(45)" patternUnits="userSpaceOnUse">
+              <rect width="8" height="8" fill="var(--water-deep)"/>
+              <line x1="0" y1="0" x2="0" y2="8" stroke="var(--water-light)" stroke-width="3" opacity="0.55"/>
+            </pattern>
+            <clipPath id="tankClip">
+              <rect x="60" y="40" width="100" height="380" rx="10"/>
+            </clipPath>
+          </defs>
+
+          <!-- tank housing -->
+          <rect x="56" y="36" width="108" height="388" rx="14" fill="none" stroke="var(--brass-dim)" stroke-width="2"/>
+          <rect x="60" y="40" width="100" height="380" rx="10" fill="#08202F"/>
+
+          <!-- fills, clipped to tank body -->
+          <g clip-path="url(#tankClip)">
+            <rect id="fillUncertain" class="fill-uncertain" x="60" width="100" y="420" height="0" fill="url(#hatchWater)"/>
+            <rect id="fillSolid" class="fill-solid" x="60" width="100" y="420" height="0" fill="var(--water-light)"/>
+          </g>
+
+          <rect x="60" y="40" width="100" height="380" rx="10" fill="none" stroke="rgba(255,255,255,0.06)" stroke-width="1"/>
+
+          <!-- threshold guide lines + reed-switch dots + labels -->
+          <g id="thresholds" font-family="IBM Plex Mono, monospace" font-size="12" fill="var(--muted)">
+            <!-- generated by JS for 0/25/50/75/100 -->
+          </g>
+        </svg>
+        <p class="tank-caption">solid = confirmed water · hatched = unconfirmed range</p>
+      </div>
+
+      <div id="cylView" class="tank-view">
+        <svg viewBox="-28 0 248 460" xmlns="http://www.w3.org/2000/svg">
+          <defs>
+            <pattern id="hatchWaterCyl" width="8" height="8" patternTransform="rotate(45)" patternUnits="userSpaceOnUse">
+              <rect width="8" height="8" fill="var(--water-deep)"/>
+              <line x1="0" y1="0" x2="0" y2="8" stroke="var(--water-light)" stroke-width="3" opacity="0.55"/>
+            </pattern>
+            <linearGradient id="cylWall" x1="0" y1="0" x2="1" y2="0">
+              <stop offset="0%" stop-color="#08202f"/>
+              <stop offset="18%" stop-color="#1c4761"/>
+              <stop offset="50%" stop-color="#356f92"/>
+              <stop offset="82%" stop-color="#1c4761"/>
+              <stop offset="100%" stop-color="#08202f"/>
+            </linearGradient>
+            <linearGradient id="cylRim" x1="0" y1="0" x2="1" y2="0">
+              <stop offset="0%" stop-color="#0e2c40"/>
+              <stop offset="50%" stop-color="#1f4e6b"/>
+              <stop offset="100%" stop-color="#0e2c40"/>
+            </linearGradient>
+            <linearGradient id="cylWaterWall" x1="0" y1="0" x2="1" y2="0">
+              <stop offset="0%" stop-color="var(--water-deep)"/>
+              <stop offset="50%" stop-color="var(--water-light)"/>
+              <stop offset="100%" stop-color="var(--water-deep)"/>
+            </linearGradient>
+            <clipPath id="cylClip">
+              <rect x="52" y="66" width="116" height="338"/>
+              <ellipse cx="110" cy="404" rx="58" ry="16"/>
+              <ellipse cx="110" cy="66" rx="58" ry="16"/>
+            </clipPath>
+          </defs>
+
+          <!-- tank body -->
+          <rect x="52" y="66" width="116" height="338" fill="url(#cylWall)"/>
+          <ellipse id="cylBaseCap" cx="110" cy="404" rx="58" ry="16" fill="#081b28" stroke="var(--brass-dim)" stroke-width="1.5"/>
+
+          <!-- water, clipped to cylinder silhouette -->
+          <g clip-path="url(#cylClip)">
+            <rect id="cylFillUncertain" x="52" width="116" y="404" height="0" fill="url(#hatchWaterCyl)"/>
+            <rect id="cylFillSolid" x="52" width="116" y="404" height="0" fill="url(#cylWaterWall)"/>
+            <ellipse id="cylSurfaceSolid" cx="110" cy="404" rx="58" ry="14" fill="var(--water-light)" opacity="0"/>
+          </g>
+          <ellipse id="cylSurfaceUncertain" cx="110" cy="404" rx="58" ry="14" fill="url(#hatchWaterCyl)" stroke="var(--water-light)" stroke-width="1.25" opacity="0"/>
+
+          <!-- rim -->
+          <ellipse cx="110" cy="66" rx="58" ry="16" fill="url(#cylRim)" stroke="var(--brass-dim)" stroke-width="1.5"/>
+
+          <!-- threshold rings + reed-switch dots + labels -->
+          <g id="cylThresholds" font-family="IBM Plex Mono, monospace" font-size="12" fill="var(--muted)">
+            <!-- generated by JS for 0/25/50/75/100 -->
+          </g>
+        </svg>
+        <p class="tank-caption">solid = confirmed water · hatched = unconfirmed range</p>
+      </div>
+    </div>
+
+    <div class="readout">
+      <div class="signal-row">
+        <span class="signal-label">Sensor signal</span>
+        <span class="signal-value" id="signalValue">75%</span>
+        <span class="status-pill status-ok" id="statusPill">Normal</span>
+      </div>
+
+      <p class="interval-text" id="intervalText"></p>
+
+      <div>
+        <span class="signal-label">Simulate a reading</span>
+        <div class="btn-row" id="btnRow">
+          <button class="lvl" data-level="0">0%</button>
+          <button class="lvl" data-level="25">25%</button>
+          <button class="lvl active" data-level="50">50%</button>
+          <button class="lvl" data-level="75">75%</button>
+          <button class="lvl" data-level="100">100%</button>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <div class="note">
+    <b>Why this matters:</b> a 4-point sensor doesn't measure continuously — it tells you which switch the water has reached. A "75%" reading means the tank is <b>at least</b> 75% full, but it could be anywhere up to completely full. Once you calibrate each threshold to actual liters, swap the % labels below for the measured litre values and the same interval logic still holds. For now, a <b>0% (no-signal) reading is treated as "level is somewhere between 0–25%"</b> — worth revisiting once you have real sensor data, since a dead reading could in principle also mean the sensor itself lost power or a wire came loose.
+  </div>
+</div>
+
+<script>
+  const LEVELS = [0, 25, 50, 75, 100];
+  const TANK_TOP = 40, TANK_BOTTOM = 420, TANK_HEIGHT = 380;
+  const yFor = (pct) => TANK_BOTTOM - (pct/100) * TANK_HEIGHT;
+
+  const thresholdsG = document.getElementById('thresholds');
+  LEVELS.forEach(pct => {
+    const y = yFor(pct);
+    const isTop = pct === 100;
+    if(!isTop){
+      const line = document.createElementNS('http://www.w3.org/2000/svg','line');
+      line.setAttribute('x1', 60); line.setAttribute('x2', 160);
+      line.setAttribute('y1', y); line.setAttribute('y2', y);
+      line.setAttribute('stroke', 'rgba(201,154,75,0.5)');
+      line.setAttribute('stroke-width', '2');
+      line.setAttribute('stroke-dasharray', '3,4');
+      thresholdsG.appendChild(line);
+    }
+    // reed switch dot
+    const dot = document.createElementNS('http://www.w3.org/2000/svg','circle');
+    dot.setAttribute('cx', 60); dot.setAttribute('cy', y); dot.setAttribute('r', 6);
+    dot.setAttribute('class','switch-dot');
+    dot.setAttribute('id', 'dot-'+pct);
+    dot.setAttribute('stroke', 'var(--brass-dim)');
+    dot.setAttribute('stroke-width', '2.5');
+    dot.setAttribute('fill', '#08202F');
+    thresholdsG.appendChild(dot);
+    // label
+    const label = document.createElementNS('http://www.w3.org/2000/svg','text');
+    label.setAttribute('x', 4); label.setAttribute('y', y+4);
+    label.setAttribute('text-anchor', 'end');
+    label.textContent = pct + '%';
+    thresholdsG.appendChild(label);
+  });
+
+  // ---- cylinder view: build threshold rings, dots, labels ----
+  const CYL_TOP = 66, CYL_BOTTOM = 404, CYL_HEIGHT = 338;
+  const cylYFor = (pct) => CYL_BOTTOM - (pct/100) * CYL_HEIGHT;
+  const SURFACE_NUDGE = 14; // px, purely cosmetic: keeps the surface cap from sitting exactly on the threshold ring/label
+
+  const cylThresholdsG = document.getElementById('cylThresholds');
+  LEVELS.forEach(pct => {
+    const y = cylYFor(pct);
+    const isEnd = (pct === 100 || pct === 0);
+    if(!isEnd){
+      const ring = document.createElementNS('http://www.w3.org/2000/svg','ellipse');
+      ring.setAttribute('cx', 110); ring.setAttribute('cy', y);
+      ring.setAttribute('rx', 58); ring.setAttribute('ry', 13);
+      ring.setAttribute('fill', 'none');
+      ring.setAttribute('stroke', 'rgba(201,154,75,0.5)');
+      ring.setAttribute('stroke-width', '2');
+      ring.setAttribute('stroke-dasharray', '3,4');
+      cylThresholdsG.appendChild(ring);
+    }
+    const dot = document.createElementNS('http://www.w3.org/2000/svg','circle');
+    dot.setAttribute('cx', 52); dot.setAttribute('cy', y); dot.setAttribute('r', 6);
+    dot.setAttribute('class','switch-dot');
+    dot.setAttribute('id', 'cyldot-'+pct);
+    dot.setAttribute('stroke', 'var(--brass-dim)');
+    dot.setAttribute('stroke-width', '2.5');
+    dot.setAttribute('fill', '#08202F');
+    cylThresholdsG.appendChild(dot);
+    const label = document.createElementNS('http://www.w3.org/2000/svg','text');
+    label.setAttribute('x', -4); label.setAttribute('y', y+4);
+    label.setAttribute('text-anchor', 'end');
+    label.textContent = pct + '%';
+    cylThresholdsG.appendChild(label);
+  });
+
+  const fillSolid = document.getElementById('fillSolid');
+  const fillUncertain = document.getElementById('fillUncertain');
+  const cylFillSolid = document.getElementById('cylFillSolid');
+  const cylFillUncertain = document.getElementById('cylFillUncertain');
+  const cylBaseCap = document.getElementById('cylBaseCap');
+  const cylSurfaceSolid = document.getElementById('cylSurfaceSolid');
+  const cylSurfaceUncertain = document.getElementById('cylSurfaceUncertain');
+  const signalValue = document.getElementById('signalValue');
+  const statusPill = document.getElementById('statusPill');
+  const intervalText = document.getElementById('intervalText');
+  const buttons = document.querySelectorAll('button.lvl');
+
+  function litDots(prefix, level, litColor){
+    LEVELS.forEach(pct => {
+      const dot = document.getElementById(prefix+pct);
+      const lit = pct <= level && !(level === 0 && pct === 0);
+      dot.setAttribute('fill', lit ? litColor : '#08202F');
+      dot.setAttribute('stroke', lit ? litColor : 'var(--brass-dim)');
+    });
+  }
+
+  function setLevel(level){
+    buttons.forEach(b => b.classList.toggle('active', Number(b.dataset.level) === level));
+    signalValue.textContent = level + '%';
+
+    const idx = LEVELS.indexOf(level);
+    const next = LEVELS[idx+1];
+
+    litDots('dot-', level, 'var(--brass)');
+    litDots('cyldot-', level, 'var(--brass)');
+
+    // ---- flat panel fills ----
+    const yLevel = yFor(level);
+    fillUncertain.setAttribute('fill', 'url(#hatchWater)');
+    fillSolid.setAttribute('y', yLevel);
+    fillSolid.setAttribute('height', TANK_BOTTOM - yLevel);
+    if(level === 100){
+      fillUncertain.setAttribute('height', 0);
+      fillUncertain.setAttribute('y', yLevel);
+    } else {
+      const yNext = yFor(next);
+      fillUncertain.setAttribute('y', yNext);
+      fillUncertain.setAttribute('height', yLevel - yNext);
+    }
+
+    // ---- cylinder fills ----
+    const cylLevel = cylYFor(level);
+    cylFillUncertain.setAttribute('fill', 'url(#hatchWaterCyl)');
+    cylFillSolid.setAttribute('y', cylLevel);
+    cylFillSolid.setAttribute('height', CYL_BOTTOM - cylLevel);
+    cylSurfaceSolid.setAttribute('cy', cylLevel);
+    cylSurfaceSolid.setAttribute('opacity', level === 0 ? 0 : 1);
+    cylBaseCap.setAttribute('fill', level === 0 ? 'url(#hatchWaterCyl)' : 'url(#cylWaterWall)');
+
+    if(level === 100){
+      cylFillUncertain.setAttribute('height', 0);
+      cylFillUncertain.setAttribute('y', cylLevel);
+      cylSurfaceUncertain.setAttribute('opacity', 0);
+    } else {
+      const cylNext = cylYFor(next);
+      cylFillUncertain.setAttribute('y', cylNext);
+      cylFillUncertain.setAttribute('height', cylLevel - cylNext);
+      cylSurfaceUncertain.setAttribute('cy', cylNext + SURFACE_NUDGE);
+      cylSurfaceUncertain.setAttribute('stroke', 'var(--water-light)');
+      cylSurfaceUncertain.setAttribute('opacity', 1);
+    }
+
+    // ---- shared readout text ----
+    statusPill.textContent = level === 100 ? 'Full' : 'Normal';
+    statusPill.className = 'status-pill status-ok';
+    if(level === 0){
+      intervalText.innerHTML = `Reading is <b>0%</b> (no signal) — treating this as: no threshold triggered yet. Actual level: <b>0%\u201325%</b>, until real sensor data says otherwise.`;
+    } else if(level === 100){
+      intervalText.innerHTML = `Reading is <b>100%</b> — top switch triggered. Actual level: <b>full</b>. No uncertainty above this point.`;
+    } else {
+      intervalText.innerHTML = `Reading is <b>${level}%</b> — this switch is triggered, the next one isn't. Actual level: <b>${level}%\u2013${next}%</b> (somewhere in that band, not necessarily exactly ${level}%).`;
+    }
+  }
+
+  buttons.forEach(btn => {
+    btn.addEventListener('click', () => setLevel(Number(btn.dataset.level)));
+  });
+
+  // ---- view toggle ----
+  const flatView = document.getElementById('flatView');
+  const cylView = document.getElementById('cylView');
+  document.querySelectorAll('.view-btn').forEach(btn => {
+    btn.addEventListener('click', () => {
+      document.querySelectorAll('.view-btn').forEach(b => b.classList.toggle('active', b === btn));
+      const showCyl = btn.dataset.view === 'cyl';
+      flatView.hidden = showCyl;
+      cylView.hidden = !showCyl;
+    });
+  });
+
+  setLevel(50);
+</script>
+</body>
+</html>

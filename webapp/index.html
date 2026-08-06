@@ -10,6 +10,10 @@
 <head>
   <link rel="manifest" href="/manifest.json">
   <meta charset="UTF-8">
+  <!-- No maximum-scale/user-scalable=no: pinch-zoom stays available on
+       phones. width=device-width alone is what makes a phone browser use
+       its true logical viewport instead of desktop-viewport emulation. -->
+  <meta name="viewport" content="width=device-width, initial-scale=1">
   <title>Virtual Bavaria Panel</title>
   <style>
     /* Dark theme matching the B&G Zeus MFD's own chrome: near-black
@@ -29,6 +33,10 @@
       font-family: -apple-system, "Segoe UI", Roboto, sans-serif;
       margin: 0;
       background-color: var(--bg);
+      background-image: url("/SailWallpaper-600.jpg");
+      background-size: cover;
+      background-position: center;
+      background-attachment: fixed;
       color: var(--text-primary);
     }
     #top-bar {
