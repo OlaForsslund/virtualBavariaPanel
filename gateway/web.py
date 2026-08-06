@@ -51,9 +51,15 @@ def create_app(runtime: GatewayRuntime) -> FastAPI:
             "output_bitmap": snapshot.output_bitmap,
             "panel_bitmap": snapshot.panel_bitmap,
             "board_bitmap": snapshot.board_bitmap,
-            "circuits": {
-                name: bool(snapshot.output_bitmap & mask)
-                for name, mask in RELAYS.items()
+            # Signal K-shaped: electrical.switches.<name>.state, one level
+            # deeper than a flat bool so it lines up with the real path
+            # (see signalk_alignment_plan.md) -- not the delta/PUT protocol
+            # itself, just the naming/nesting convention.
+            "electrical": {
+                "switches": {
+                    name: {"state": bool(snapshot.output_bitmap & mask)}
+                    for name, mask in RELAYS.items()
+                }
             },
         }
 
@@ -64,8 +70,16 @@ def create_app(runtime: GatewayRuntime) -> FastAPI:
             raise HTTPException(status_code=503, detail="sensors not read yet")
         cal = runtime.storage.load_config().get("calibration", {})
         return {
-            "starter_voltage": snapshot.starter_voltage,
-            "house_voltage": snapshot.house_voltage,
+            # Signal K-shaped: electrical.batteries.<name>.voltage (see
+            # signalk_alignment_plan.md). Tanks stay as they are for now --
+            # no single capacity figure to turn the level into SK's 0-1
+            # currentLevel ratio (plan doc, section 4).
+            "electrical": {
+                "batteries": {
+                    "starter": {"voltage": snapshot.starter_voltage},
+                    "house": {"voltage": snapshot.house_voltage},
+                }
+            },
             # "_level", not "_pct": a discrete rod/float step (0/25/50/75/100),
             # not a true continuous percentage -- see gateway/calibration.py.
             "freshwater_level": snapshot.freshwater_level,

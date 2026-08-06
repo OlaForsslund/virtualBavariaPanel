@@ -453,7 +453,7 @@
       el.style.display = text ? '' : 'none';
     }
 
-    async function setLanterns(on) {
+    async function setNavigationLights(on) {
       await Promise.all([setCircuit('LANTERN_BOW', on), setCircuit('LANTERN_AFT', on)]);
     }
 
@@ -468,16 +468,16 @@
     // Essentials: a small curated/relabeled subset, not tied to Config's
     // per-circuit visibility (that only governs the All Controls tab).
     function renderEssentials(status) {
-      const c = status.circuits;
+      const c = status.electrical.switches;
       const container = document.getElementById('essentials-circuits');
       container.innerHTML = '';
 
-      const lanternsOn = c.LANTERN_BOW && c.LANTERN_AFT;
-      container.appendChild(makeCircuitButton('Lanterns', lanternsOn, () => setLanterns(!lanternsOn)));
-      container.appendChild(makeCircuitButton('Anchor light', c.LANTERN_MASTHEAD, () => setCircuit('LANTERN_MASTHEAD', !c.LANTERN_MASTHEAD)));
-      container.appendChild(makeCircuitButton('Steaming light', c.LANTERN_STEAM, () => setCircuit('LANTERN_STEAM', !c.LANTERN_STEAM)));
-      container.appendChild(makeCircuitButton('Deck light', c.DECK_LIGHT, () => setCircuit('DECK_LIGHT', !c.DECK_LIGHT)));
-      container.appendChild(makeCircuitButton('Cockpit outlet', c.F5, () => setCircuit('F5', !c.F5)));
+      const navLightsOn = c.LANTERN_BOW.state && c.LANTERN_AFT.state;
+      container.appendChild(makeCircuitButton('Navigation lights', navLightsOn, () => setNavigationLights(!navLightsOn)));
+      container.appendChild(makeCircuitButton('Anchor light', c.LANTERN_MASTHEAD.state, () => setCircuit('LANTERN_MASTHEAD', !c.LANTERN_MASTHEAD.state)));
+      container.appendChild(makeCircuitButton('Steaming light', c.LANTERN_STEAM.state, () => setCircuit('LANTERN_STEAM', !c.LANTERN_STEAM.state)));
+      container.appendChild(makeCircuitButton('Deck light', c.DECK_LIGHT.state, () => setCircuit('DECK_LIGHT', !c.DECK_LIGHT.state)));
+      container.appendChild(makeCircuitButton('Cockpit outlet', c.F5.state, () => setCircuit('F5', !c.F5.state)));
     }
 
     function renderControl(status) {
@@ -488,19 +488,20 @@
       setStateLine('state', hasIssue ? summary : '');
       setStateLine('essentials-state', hasIssue ? summary : '');
 
-      const circuitsSummary = Object.entries(status.circuits)
-        .map(([name, on]) => `${name}: ${on ? 'ON' : 'OFF'}`).join(', ');
+      const circuitsSummary = Object.entries(status.electrical.switches)
+        .map(([name, sw]) => `${name}: ${sw.state ? 'ON' : 'OFF'}`).join(', ');
       document.getElementById('diag-status').textContent = `${summary} — ${circuitsSummary}`;
 
       renderEssentials(status);
 
-      const names = Object.keys(status.circuits);
+      const names = Object.keys(status.electrical.switches);
       renderConfigOnce(names);
 
       const container = document.getElementById('circuits');
       container.innerHTML = '';
-      for (const [name, on] of Object.entries(status.circuits)) {
+      for (const [name, sw] of Object.entries(status.electrical.switches)) {
         if (!isVisible(name)) continue;
+        const on = sw.state;
         const btn = document.createElement('button');
         btn.className = on ? 'circuit on' : 'circuit';
         btn.textContent = `${name}: ${on ? 'ON' : 'OFF'}`;
@@ -525,12 +526,14 @@
       document.getElementById('gauge-black').style.width = `${data.blackwater_level}%`;
       document.getElementById('value-black').textContent =
         data.blackwater_liters !== null ? `${data.blackwater_liters} L` : `${data.blackwater_level}%`;
-      document.getElementById('value-starter').textContent = `${data.starter_voltage.toFixed(2)} V`;
-      document.getElementById('value-house').textContent = `${data.house_voltage.toFixed(2)} V`;
+      const starterVoltage = data.electrical.batteries.starter.voltage;
+      const houseVoltage = data.electrical.batteries.house.voltage;
+      document.getElementById('value-starter').textContent = `${starterVoltage.toFixed(2)} V`;
+      document.getElementById('value-house').textContent = `${houseVoltage.toFixed(2)} V`;
       // Sensor calibration page shows the same live voltage as reference
       // while you're about to type in a multimeter reading next to it.
-      document.getElementById('cal-starter-voltage').textContent = `${data.starter_voltage.toFixed(2)} V`;
-      document.getElementById('cal-house-voltage').textContent = `${data.house_voltage.toFixed(2)} V`;
+      document.getElementById('cal-starter-voltage').textContent = `${starterVoltage.toFixed(2)} V`;
+      document.getElementById('cal-house-voltage').textContent = `${houseVoltage.toFixed(2)} V`;
     }
 
     async function pollSensors() {

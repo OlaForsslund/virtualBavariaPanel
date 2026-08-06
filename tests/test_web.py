@@ -61,12 +61,12 @@ def test_status_circuits_are_named_and_reflect_the_bitmap():
     )
     client = TestClient(create_app(runtime))
 
-    circuits = client.get("/status").json()["circuits"]
+    switches = client.get("/status").json()["electrical"]["switches"]
 
-    assert circuits["ANCHOR"] is True
-    assert circuits["BILGE_PUMP"] is True
-    assert circuits["FRIDGE"] is False
-    assert set(circuits) == set(RELAYS)
+    assert switches["ANCHOR"] == {"state": True}
+    assert switches["BILGE_PUMP"] == {"state": True}
+    assert switches["FRIDGE"] == {"state": False}
+    assert set(switches) == set(RELAYS)
 
 
 def test_post_circuit_queues_a_command_it_does_not_run_it_inline():
