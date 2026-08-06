@@ -9,10 +9,24 @@ lets you size mockups without the physical MFD in hand.
 
 - Model: B&G Zeus3 7 (`mfd_model_detail=Zeus3 7` in the app-launch query
   string; `mfd_name` is the boat's own MFD hostname, "Aventyret")
+- Full launch query string, as observed in lighttpd's access log referer
+  field (`GET /status`, 2026-08-06):
+  `?mfd_name=Aventyret&mfd_model_detail=Zeus3%207&lang=en&mode=day&brand=B%26G`
+  — `lang`/`mode`/`brand` not currently read by `webapp/index.html`, but
+  available if the app ever wants to adapt (e.g. `mode=day`/`night`
+  theming).
+  **TODO / idea:** `mode` looks like it tracks the MFD's own day/night
+  display setting (dims/inverts other native screens at night) — worth
+  listening to this in the future to switch the webapp's own theme
+  in sync, so it isn't a bright white/day page on an otherwise
+  night-dimmed helm. Not yet confirmed whether it updates live if the
+  MFD's mode changes while the app is already open, or only at launch.
 - Browser: `QtWebEngine/5.12.9`, Chromium 69 (`Chrome/69.0.3497.128`)
   — fully supports ES2017 (async/await, arrow fns, template literals,
   destructuring, classes, spread, `fetch`). Does **not** support ES2020+
   (`??`, `?.` throw a `SyntaxError`. See CLAUDE.md for the bug this caused.)
+  Verbatim `navigator.userAgent`, confirmed 2026-08-06:
+  `Mozilla/5.0 (X11; Linux armv7l) AppleWebKit/537.36 (KHTML, like Gecko) QtWebEngine/5.12.9 Chrome/69.0.3497.128 Safari/537.36`
 - No service worker support surfaced (`'serviceWorker' in navigator` false)
   — expected, the app is served over plain HTTP and service workers
   require a secure context.

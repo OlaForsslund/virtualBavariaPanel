@@ -88,9 +88,9 @@ enter()` (`gateway/state_machine.py`) now adopts `panel_bitmap`, not
 `board_bitmap` — the panel has memory (re-asserts switches across power
 cycles), the board doesn't (defaults all-off on boot/timeout). The one
 with memory dictates initial state. Also updated `architecture.md` §6;
-test renamed to `test_adopts_panel_state_on_entering_activating`. Not yet
-hardware-verified against a fresh takeover — next boat session should
-confirm activation with panel/board bitmaps deliberately mismatched.
+test renamed to `test_adopts_panel_state_on_entering_activating`.
+Hardware-verified against a fresh takeover with mismatched panel/board
+bitmaps.
 
 ## Status after 2026-07-25 boat test & deploy session
 
@@ -201,6 +201,60 @@ between the two, no drift there. Backend note: the frontend's ETag/
 just an unfinished optimization; worth wiring up the `ETag` header if this
 ever needs to matter for bandwidth.
 
+## Status after 2026-08-06 boat session
+
+**Simplified lighttpd to a pure reverse proxy (item 4 below, now done).**
+lighttpd was serving a hand-copied duplicate of `webapp/` from
+`/var/www/html` *and* only proxying four API path prefixes to uvicorn —
+the exact duplication that caused the 2026-07-25 repo/deployment drift
+bug. Since uvicorn already serves the full webapp itself
+(`gateway/web.py`'s `StaticFiles` mount), lighttpd's only real job is
+holding privileged port 80. Changed
+`deploy/etc/lighttpd/conf-available/20-vbp-proxy.conf` to proxy
+*everything* unconditionally (`proxy.server = ("" => ((...)))` with no
+`$HTTP["url"]` match), applied it live (`/etc/lighttpd/conf-available/`
+is a hand-copied file, not a symlink to the repo — updated both),
+`systemctl reload lighttpd`, verified `/`, `/status`, and a nonexistent
+path all round-trip through uvicorn (404 came back as FastAPI JSON, not
+a lighttpd docroot error page), then deleted `/var/www/html` entirely.
+`webapp/` is now the single source of truth in every run mode, matching
+`run_hardware.sh`.
+
+**Correction to the above — `/var/www/html/app/` was NOT cruft.** Initially
+guessed (wrongly) that it was leftover favicon-generator debris and deleted
+it along with the rest of `/var/www/html`. It was actually a deployed build
+of `~/venus-html5-app` (Victron's Venus OS HTML5 app, a separate git repo,
+not part of this project) at path `/app`, advertised over avahi via
+`/etc/avahi/services/victron.service` (`app_id=my-vessel-dashboard`). Source
+was untouched, so nothing was permanently lost, but the deployed copy had to
+be restored: re-copied `~/venus-html5-app/public/` to `/var/www/html/app`,
+and since the new proxy-everything lighttpd rule would otherwise route `/app`
+to uvicorn (which knows nothing about it), added an exception —
+`$HTTP["url"] !~ "^/app"` around the `proxy.server` block in
+`20-vbp-proxy.conf` — so `/app` keeps being served by lighttpd's own static
+file serving while everything else proxies to uvicorn. Verified both paths
+work (`/app/` 200 from lighttpd, `/status` still proxies to the gateway).
+Lesson: before deleting anything under `/var/www/html` again, cross-check
+`/etc/avahi/services/*.service` for `path=` TXT records first.
+
+**MFD `navigator.userAgent`, pinned down verbatim (item 5, resolved).** Didn't
+need a new diagnostics beacon — `mod_accesslog` was already enabled on
+lighttpd (`/etc/lighttpd/conf-enabled/10-accesslog.conf` →
+`/var/log/lighttpd/access.log`, root/`www-data`-only, needs `sudo`) and had
+been quietly recording every MFD request's UA string and referer since the
+2026-07-26 deploy. Confirmed value, from a live `GET /status`:
+
+```
+Mozilla/5.0 (X11; Linux armv7l) AppleWebKit/537.36 (KHTML, like Gecko) QtWebEngine/5.12.9 Chrome/69.0.3497.128 Safari/537.36
+```
+
+i.e. QtWebEngine 5.12.9 on Chromium 69.0.3497.128, armv7l — matches the
+2026-07-25 paraphrase exactly, now on record verbatim. Also incidentally
+confirmed via the referer query string that the MFD passes app context as
+URL params: `mfd_name=Aventyret&mfd_model_detail=Zeus3%207&lang=en&mode=day&brand=B%26G`
+— not currently read by `webapp/index.html` but available if the app ever
+wants to adapt to `mode=day`/`night` or brand.
+
 ## Next steps
 
 1. Add `--script` timed-press option to panel_sim for automated integration
@@ -209,28 +263,12 @@ ever needs to matter for bandwidth.
 2. EDS files promised in docs but sims hand-roll SDO — decide: author EDS or
    amend docs. Venus OS deployment later.
 3. Possible open-sourcing: keep the private analysis repo unnamed in all docs.
-4. **Simplify lighttpd to pure reverse proxy.** Currently lighttpd serves
-   `webapp/` itself from a hand-copied `/var/www/html` docroot and only
-   proxies API paths (`deploy/etc/lighttpd/conf-available/20-vbp-proxy.conf`,
-   `^/(status|circuits|sensors|ws)`) to uvicorn on `127.0.0.1:8000` — but
-   uvicorn already serves the webapp too (`gateway/web.py`'s `StaticFiles`
-   mount, used by `run_hardware.sh`). lighttpd's only real job is holding
-   privileged port 80; the static-serving duplication is what caused the
-   repo/deployment drift bug (2026-07-25 session). Fix: make lighttpd proxy
-   *everything* unconditionally —
-   ```lighttpd
-   server.modules += ("mod_proxy")
-   proxy.server = ( "" => (( "host" => "127.0.0.1", "port" => 8000 )) )
-   ```
-   — then drop the `/var/www/html` hand-copy; the repo's `webapp/` becomes
-   the single source of truth in every run mode. Not yet applied — user
-   wanted to commit other pending changes first and investigate something
-   else before circling back.
-5. **Document the MFD's exact `navigator.userAgent` string next time on the
-   boat.** The 2026-07-25 diagnostics beacon captured it live but the value
-   itself was never recorded anywhere (only paraphrased here as
-   `QtWebEngine/5.12.9`, Chromium 69) — worth pinning down verbatim for
-   future ES-compatibility checks.
-   Also suggest we take screenshots on the device to get the actual
-   look of the different configurations. 
+4. ~~Simplify lighttpd to pure reverse proxy.~~ **Done, 2026-08-06** — see
+   status section below.
+5. ~~Document the MFD's exact `navigator.userAgent` string next time on the
+   boat.~~ **Done, 2026-08-06** — see status section below. Screenshots of
+   the different configurations also done, 2026-08-06 — 10 shots
+   (homescreen, single/dual/triple app view incl. autopilot pairing, chart
+   view) under `webapp/dev/screenshots/`. Not yet analyzed for layout/CSS
+   fixes — deferred.
 

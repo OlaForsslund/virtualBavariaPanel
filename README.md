@@ -85,8 +85,10 @@ this, the button's request will just fail.
 
 ### Virtual Panel as a webapp
 
-`webapp/` is the static frontend; `lighttpd` serves it and reverse-proxies
-the API calls to the gateway's built-in REST server —
+`webapp/` is the static frontend; the gateway's built-in REST server
+(`gateway/web.py`, uvicorn on `127.0.0.1:8000`) serves it directly and
+handles the API calls. `lighttpd` just holds privileged port 80 and
+reverse-proxies everything to uvicorn —
 `deploy/etc/lighttpd/conf-available/20-vbp-proxy.conf`. It works as an
 ordinary webpage — any browser on the network can load it and control the
 panel.
