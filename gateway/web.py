@@ -9,16 +9,23 @@ directly — only `runtime.command_queue.submit()` to send commands and
 
 from __future__ import annotations
 
+import asyncio
 import subprocess
 from pathlib import Path
 from typing import TYPE_CHECKING, Literal
 
-from fastapi import FastAPI, HTTPException, Request
+from fastapi import FastAPI, HTTPException, Request, WebSocket, WebSocketDisconnect
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel
 
 from gateway import calibration
 from gateway.constants import RELAYS
+
+# Internal check interval for the /subscribe WebSocket -- how often it
+# re-reads the lock-free snapshot buffers to look for changes, independent
+# of (and much faster than) the browser's old REST poll cadence. Just
+# comparing dicts in memory, no CAN/bus access, so cheap regardless.
+WS_POLL_PERIOD = 0.2
 
 if TYPE_CHECKING:
     # Only for the type hint below — runtime.py imports create_app, so a
@@ -35,6 +42,32 @@ class CircuitCommand(BaseModel):
 class BatteryCalibration(BaseModel):
     channel: Literal["starter", "house"]
     actual_voltage: float
+
+
+def _switch_values(status) -> dict[str, bool]:
+    return {
+        f"electrical.switches.{name}.state": bool(status.output_bitmap & mask)
+        for name, mask in RELAYS.items()
+    }
+
+
+def _battery_values(sensors) -> dict[str, float]:
+    return {
+        "electrical.batteries.starter.voltage": sensors.starter_voltage,
+        "electrical.batteries.house.voltage": sensors.house_voltage,
+    }
+
+
+def _tank_values(sensors) -> dict[str, float]:
+    return {
+        "tanks.freshWater.currentLevel": sensors.freshwater_level / 100,
+        "tanks.blackWater.currentLevel": sensors.blackwater_level / 100,
+    }
+
+
+def _diff(previous: dict[str, bool | float], current: dict[str, bool | float]) -> dict[str, bool | float]:
+    """Pure: entries in `current` that are new or changed vs. `previous`."""
+    return {path: v for path, v in current.items() if previous.get(path) != v}
 
 
 def create_app(runtime: GatewayRuntime) -> FastAPI:
@@ -68,26 +101,27 @@ def create_app(runtime: GatewayRuntime) -> FastAPI:
         snapshot = runtime.sensor_buffer.snapshot
         if snapshot is None:
             raise HTTPException(status_code=503, detail="sensors not read yet")
-        cal = runtime.storage.load_config().get("calibration", {})
         return {
-            # Signal K-shaped: electrical.batteries.<name>.voltage (see
-            # signalk_alignment_plan.md). Tanks stay as they are for now --
-            # no single capacity figure to turn the level into SK's 0-1
-            # currentLevel ratio (plan doc, section 4).
+            # Signal K-shaped: electrical.batteries.<name>.voltage,
+            # tanks.<name>.currentLevel (see signalk_alignment_plan.md §4/§7).
+            # currentLevel is just the sender's own reading rescaled to the
+            # spec's 0-1 "ratio" units -- confirmed against the schema that
+            # it has no required relationship to a tank capacity figure, so
+            # there's nothing to derive here despite the non-uniform
+            # cross-section (gateway/calibration.py). The liters conversion
+            # moved client-side (webapp/index.html tankLiters()), reading
+            # the same per-level calibration table this used to look up
+            # here via calibration.tank_liters().
             "electrical": {
                 "batteries": {
                     "starter": {"voltage": snapshot.starter_voltage},
                     "house": {"voltage": snapshot.house_voltage},
                 }
             },
-            # "_level", not "_pct": a discrete rod/float step (0/25/50/75/100),
-            # not a true continuous percentage -- see gateway/calibration.py.
-            "freshwater_level": snapshot.freshwater_level,
-            "blackwater_level": snapshot.blackwater_level,
-            # None (-> null) when that level hasn't been calibrated yet --
-            # the client falls back to showing the raw level only.
-            "freshwater_liters": calibration.tank_liters(snapshot.freshwater_level, cal, "freshwater"),
-            "blackwater_liters": calibration.tank_liters(snapshot.blackwater_level, cal, "blackwater"),
+            "tanks": {
+                "freshWater": {"currentLevel": snapshot.freshwater_level / 100},
+                "blackWater": {"currentLevel": snapshot.blackwater_level / 100},
+            },
         }
 
     @app.post("/calibration/battery")
@@ -143,6 +177,47 @@ def create_app(runtime: GatewayRuntime) -> FastAPI:
         # sudo on this box already (deploy prerequisite, not set up here).
         subprocess.Popen(["sudo", "systemctl", "reboot"])
         return {"status": "restarting"}
+
+    @app.websocket("/subscribe")
+    async def subscribe(websocket: WebSocket) -> None:
+        # Speaks a subset of Signal K's wire protocol (subscribe + delta
+        # shapes) so the webapp's client code can point at a real
+        # signalk-server later with no changes -- see
+        # signalk_alignment_plan.md §7. Simplification, noted there: the
+        # incoming subscribe message is accepted (so the shape matches) but
+        # not filtered on -- with ~27 values total and one real consumer,
+        # every change is sent regardless of what was subscribed to.
+        await websocket.accept()
+        try:
+            await websocket.receive_json()
+        except WebSocketDisconnect:
+            return
+
+        last_sent: dict[str, bool | float] = {}
+        try:
+            while True:
+                current: dict[str, bool | float] = {}
+                status = runtime.status_buffer.snapshot
+                if status is not None:
+                    current.update(_switch_values(status))
+                sensors = runtime.sensor_buffer.snapshot
+                if sensors is not None:
+                    current.update(_battery_values(sensors))
+                    current.update(_tank_values(sensors))
+
+                changed = _diff(last_sent, current)
+                if changed:
+                    await websocket.send_json({
+                        "context": "vessels.self",
+                        "updates": [
+                            {"values": [{"path": path, "value": v} for path, v in changed.items()]}
+                        ],
+                    })
+                    last_sent.update(changed)
+
+                await asyncio.sleep(WS_POLL_PERIOD)
+        except WebSocketDisconnect:
+            pass
 
     @app.middleware("http")
     async def no_cache_html(request: Request, call_next):

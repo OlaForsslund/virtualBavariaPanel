@@ -6,7 +6,7 @@ from gateway.command_queue import CommandQueue
 from gateway.constants import RELAYS
 from gateway.runtime import SensorBuffer, SensorSnapshot, StatusBuffer, StatusSnapshot
 from gateway.storage import Storage
-from gateway.web import create_app
+from gateway.web import _diff, create_app
 
 
 class StubRuntime:
@@ -186,28 +186,19 @@ def test_get_sensors_before_first_reading_is_503(tmp_path):
     assert resp.status_code == 503
 
 
-def test_get_sensors_reports_liters_as_null_when_no_capacity_configured(tmp_path):
+def test_get_sensors_reports_tank_levels_as_a_0_1_ratio(tmp_path):
+    # Liters conversion moved client-side (webapp tankLiters(), reading the
+    # per-level calibration table) -- this endpoint no longer depends on
+    # calibration config at all, just rescales the sender's raw 0/25/50/75/100
+    # step into Signal K's 0-1 "ratio" units (signalk_alignment_plan.md §4).
     runtime = StubRuntime(tmp_path)
-    runtime.sensor_buffer.snapshot = _sensor_snapshot()
+    runtime.sensor_buffer.snapshot = _sensor_snapshot(freshwater_level=50, blackwater_level=25)
     client = TestClient(create_app(runtime))
 
     body = client.get("/sensors").json()
 
-    assert body["freshwater_level"] == 50
-    assert body["freshwater_liters"] is None
-    assert body["blackwater_liters"] is None
-
-
-def test_get_sensors_reports_liters_once_level_configured(tmp_path):
-    runtime = StubRuntime(tmp_path)
-    runtime.sensor_buffer.snapshot = _sensor_snapshot(freshwater_level=50)
-    runtime.storage.save_config({"calibration": {"freshwater_levels_l": {"50": 69}}})
-    client = TestClient(create_app(runtime))
-
-    body = client.get("/sensors").json()
-
-    assert body["freshwater_liters"] == 69.0
-    assert body["blackwater_liters"] is None
+    assert body["tanks"]["freshWater"]["currentLevel"] == 0.5
+    assert body["tanks"]["blackWater"]["currentLevel"] == 0.25
 
 
 def test_calibrate_battery_before_first_reading_is_503(tmp_path):
@@ -252,6 +243,91 @@ def test_calibrate_battery_rejects_zero_raw_reading(tmp_path):
     resp = client.post("/calibration/battery", json={"channel": "starter", "actual_voltage": 13.6})
 
     assert resp.status_code == 422
+
+
+def test_subscribe_sends_current_state_as_first_message(tmp_path):
+    # First message is naturally a full dump: the diff starts against an
+    # empty "last sent" baseline, so everything looks "changed". Harmless
+    # (the client applies it like any other delta) and not relied upon --
+    # per signalk_alignment_plan.md §7 the client fetches its own REST
+    # snapshot on connect regardless.
+    runtime = StubRuntime(tmp_path)
+    runtime.status_buffer.snapshot = StatusSnapshot(
+        state="OPERATIONAL",
+        output_bitmap=RELAYS["ANCHOR"],
+        panel_bitmap=None,
+        board_bitmap=None,
+        streaming=True,
+    )
+    runtime.sensor_buffer.snapshot = _sensor_snapshot(starter_voltage=13.6, house_voltage=13.2)
+    client = TestClient(create_app(runtime))
+
+    with patch("gateway.web.WS_POLL_PERIOD", 0.01):
+        with client.websocket_connect("/subscribe") as ws:
+            ws.send_json({"context": "vessels.self", "subscribe": [{"path": "electrical.switches.*"}]})
+            msg = ws.receive_json()
+
+    assert msg["context"] == "vessels.self"
+    values = {v["path"]: v["value"] for v in msg["updates"][0]["values"]}
+    assert values["electrical.switches.ANCHOR.state"] is True
+    assert values["electrical.switches.FRIDGE.state"] is False
+    assert values["electrical.batteries.starter.voltage"] == 13.6
+    assert values["electrical.batteries.house.voltage"] == 13.2
+    assert values["tanks.freshWater.currentLevel"] == 0.5  # _sensor_snapshot() default: freshwater_level=50
+    assert values["tanks.blackWater.currentLevel"] == 0.25  # default: blackwater_level=25
+
+
+def test_subscribe_sends_only_the_changed_path_on_a_later_update(tmp_path):
+    runtime = StubRuntime(tmp_path)
+    runtime.status_buffer.snapshot = StatusSnapshot(
+        state="OPERATIONAL", output_bitmap=0, panel_bitmap=None, board_bitmap=None, streaming=True,
+    )
+    runtime.sensor_buffer.snapshot = _sensor_snapshot()
+    client = TestClient(create_app(runtime))
+
+    with patch("gateway.web.WS_POLL_PERIOD", 0.01):
+        with client.websocket_connect("/subscribe") as ws:
+            ws.send_json({"context": "vessels.self", "subscribe": []})
+            ws.receive_json()  # the initial full dump (previous test covers its content)
+
+            runtime.status_buffer.snapshot = StatusSnapshot(
+                state="OPERATIONAL", output_bitmap=RELAYS["BILGE_PUMP"],
+                panel_bitmap=None, board_bitmap=None, streaming=True,
+            )
+            msg = ws.receive_json()
+
+    values = {v["path"]: v["value"] for v in msg["updates"][0]["values"]}
+    assert values == {"electrical.switches.BILGE_PUMP.state": True}
+
+
+def test_diff_is_empty_when_nothing_changed():
+    assert _diff({"a": True, "b": 1.0}, {"a": True, "b": 1.0}) == {}
+
+
+def test_diff_reports_only_changed_or_new_entries():
+    previous = {"a": True, "b": 1.0}
+    current = {"a": False, "b": 1.0, "c": 2.0}
+
+    assert _diff(previous, current) == {"a": False, "c": 2.0}
+
+
+def test_subscribe_skips_sensor_values_until_sensors_are_read(tmp_path):
+    runtime = StubRuntime(tmp_path)
+    runtime.status_buffer.snapshot = StatusSnapshot(
+        state="OPERATIONAL", output_bitmap=0, panel_bitmap=None, board_bitmap=None, streaming=True,
+    )
+    # sensor_buffer.snapshot left None, as before the first sensor poll
+    client = TestClient(create_app(runtime))
+
+    with patch("gateway.web.WS_POLL_PERIOD", 0.01):
+        with client.websocket_connect("/subscribe") as ws:
+            ws.send_json({"context": "vessels.self", "subscribe": []})
+            msg = ws.receive_json()
+
+    paths = {v["path"] for v in msg["updates"][0]["values"]}
+    assert "electrical.batteries.starter.voltage" not in paths
+    assert "tanks.freshWater.currentLevel" not in paths
+    assert "electrical.switches.ANCHOR.state" in paths
 
 
 def test_post_diagnostics_is_logged_with_client_ip(tmp_path):

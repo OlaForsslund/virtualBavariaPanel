@@ -36,7 +36,7 @@ log = logging.getLogger("gateway")
 
 INVALID_BIT = 0x80000000
 TICK_PERIOD = 0.1
-SENSOR_POLL_PERIOD = 5.0
+SENSOR_POLL_PERIOD = 1.0
 
 
 class StreamBuffer:

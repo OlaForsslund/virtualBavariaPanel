@@ -188,6 +188,7 @@
     </header>
     <p><button class="action-btn" onclick="location.hash='relays'">Circuit visibility</button></p>
     <p><button class="action-btn" onclick="location.hash='sensor-calibration'">Sensor calibration</button></p>
+    <p><button class="action-btn" onclick="location.hash='tank-settings'">Tank settings</button></p>
   </section>
 
   <section id="view-relays" class="view">
@@ -198,6 +199,35 @@
 
   <section id="view-sensor-calibration" class="view">
     <p><button class="action-btn" onclick="location.hash='config'">&larr; Settings</button></p>
+
+    <h3>Battery voltage</h3>
+    <p>Measure with a multimeter, enter the actual voltage, then calibrate.</p>
+    <p>
+      Starter: <span id="cal-starter-voltage">&mdash;</span>
+      <input type="number" step="0.01" id="cal-starter-actual" placeholder="actual V">
+      <button class="action-btn" onclick="calibrateBattery('starter')">Calibrate</button>
+    </p>
+    <p>
+      House: <span id="cal-house-voltage">&mdash;</span>
+      <input type="number" step="0.01" id="cal-house-actual" placeholder="actual V">
+      <button class="action-btn" onclick="calibrateBattery('house')">Calibrate</button>
+    </p>
+    <p id="cal-battery-status"></p>
+  </section>
+
+  <section id="view-tank-settings" class="view">
+    <p><button class="action-btn" onclick="location.hash='config'">&larr; Settings</button></p>
+    <p><button class="action-btn" id="tank-sound-btn" onclick="toggleTankSound()">Sound at level change: off</button></p>
+    <div class="gauge">
+      <div class="gauge-label">Freshwater</div>
+      <div class="gauge-bar"><div class="gauge-fill" id="tv-gauge-fresh" style="width:0%"></div></div>
+      <div class="gauge-value" id="tv-value-fresh">&mdash;</div>
+    </div>
+    <div class="gauge">
+      <div class="gauge-label">Blackwater</div>
+      <div class="gauge-bar"><div class="gauge-fill" id="tv-gauge-black" style="width:0%"></div></div>
+      <div class="gauge-value" id="tv-value-black">&mdash;</div>
+    </div>
 
     <h3>Tank levels</h3>
     <p>Enter the liters measured at each sensor step (the sender only
@@ -221,20 +251,6 @@
     </p>
     <p><button class="action-btn" onclick="saveTankLevels()">Save</button></p>
     <p id="cal-tank-status"></p>
-
-    <h3>Battery voltage</h3>
-    <p>Measure with a multimeter, enter the actual voltage, then calibrate.</p>
-    <p>
-      Starter: <span id="cal-starter-voltage">&mdash;</span>
-      <input type="number" step="0.01" id="cal-starter-actual" placeholder="actual V">
-      <button class="action-btn" onclick="calibrateBattery('starter')">Calibrate</button>
-    </p>
-    <p>
-      House: <span id="cal-house-voltage">&mdash;</span>
-      <input type="number" step="0.01" id="cal-house-actual" placeholder="actual V">
-      <button class="action-btn" onclick="calibrateBattery('house')">Calibrate</button>
-    </p>
-    <p id="cal-battery-status"></p>
   </section>
 
   <script>
@@ -348,6 +364,14 @@
             }
           }
         }
+        if (typeof config.tank_sound_enabled === 'boolean') {
+          applyTankSoundState(config.tank_sound_enabled);
+          try {
+            localStorage.setItem(TANK_SOUND_KEY, JSON.stringify(config.tank_sound_enabled));
+          } catch (err) {
+            // can't cache locally; server config is still the source of truth next load
+          }
+        }
       } catch (err) {
         // stay on whatever localStorage already has; calibration form is
         // just left blank
@@ -433,9 +457,11 @@
       }
     }
 
-    // -- control: poll GET /status (conditional, via ETag), render, POST on click --
-    const POLL_MS = 500;
-
+    // -- control: subscribe over WebSocket for live updates, REST for the
+    // initial/reconnect snapshot (deltas alone can't recover state missed
+    // while disconnected), POST on click. Speaks a subset of Signal K's
+    // wire protocol (see signalk_alignment_plan.md §7) so this same code
+    // can point at a real signalk-server later -- only the URL changes.
     async function setCircuit(name, on) {
       await fetch(`/circuits/${name}`, {
         method: 'POST',
@@ -510,22 +536,97 @@
       }
     }
 
-    // -- sensors sidebar: separate slow poll, matches the backend's own
-    // 5s read cadence (gateway/runtime.py SENSOR_POLL_PERIOD) — no point
-    // polling faster than the source updates.
-    const SENSOR_POLL_MS = 5000;
+    // -- sensors sidebar: subscribes over the same WebSocket as switches now
+    // (gateway/runtime.py SENSOR_POLL_PERIOD dropped 5s -> 1s, so unlike
+    // before there's a real latency win here too), REST for the initial/
+    // reconnect snapshot. tanks.*.currentLevel arrives as a 0-1 ratio
+    // (signalk_alignment_plan.md §4/§7) -- liters is a client-side lookup
+    // against the same per-level calibration table the Sensor calibration
+    // form already edits, not something the server computes anymore.
+    let lastSensors = null;
+
+    function tankLiters(tank, currentLevel) {
+      const level = Math.round(currentLevel * 100); // exact: 0/25/50/75/100, no rounding error
+      const raw = document.getElementById(`cal-${tank}-${level}`).value;
+      return raw === '' ? null : parseFloat(raw);
+    }
+
+    // -- tank settings: sound-on-level-change toggle + live gauges (markup above) --
+    const TANK_SOUND_KEY = 'vbp.tankSoundEnabled';
+    let tankSoundEnabled = false;
+
+    function applyTankSoundState(enabled) {
+      tankSoundEnabled = enabled;
+      document.getElementById('tank-sound-btn').textContent = `Sound at level change: ${enabled ? 'on' : 'off'}`;
+    }
+
+    function loadCachedTankSound() {
+      try {
+        return JSON.parse(localStorage.getItem(TANK_SOUND_KEY) || 'false');
+      } catch (err) {
+        return false; // localStorage unavailable -- stays off until/unless server config arrives
+      }
+    }
+    applyTankSoundState(loadCachedTankSound());
+
+    function playTankChangeSound() {
+      const Ctx = window.AudioContext || window.webkitAudioContext;
+      if (!Ctx) return;
+      const ctx = new Ctx();
+      const osc = ctx.createOscillator();
+      const gain = ctx.createGain();
+      osc.frequency.value = 880;
+      gain.gain.setValueAtTime(0.2, ctx.currentTime);
+      gain.gain.exponentialRampToValueAtTime(0.001, ctx.currentTime + 0.15);
+      osc.connect(gain);
+      gain.connect(ctx.destination);
+      osc.start();
+      osc.stop(ctx.currentTime + 0.15);
+    }
+
+    // Same localStorage-cache + PUT /config pattern as setVisibleSet -- instant
+    // local update, best-effort persisted server-side for other devices/reloads.
+    async function setTankSoundEnabled(enabled) {
+      applyTankSoundState(enabled);
+      try {
+        localStorage.setItem(TANK_SOUND_KEY, JSON.stringify(enabled));
+      } catch (err) {
+        // can't cache locally; still persisted server-side below
+      }
+      try {
+        await fetch('/config', {
+          method: 'PUT',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ tank_sound_enabled: enabled }),
+        });
+      } catch (err) {
+        // server unreachable -- local cache above still covers this session
+      }
+    }
+
+    function toggleTankSound() {
+      setTankSoundEnabled(!tankSoundEnabled);
+      playTankChangeSound(); // plays either way -- lets you confirm it's audible, and the tap unlocks autoplay for later
+    }
 
     function renderSensors(data) {
-      // data.*_level is a discrete rod/float step (0/25/50/75/100), not a
-      // true percentage -- still shown with a "%" suffix here since that's
-      // an intuitive display shorthand for a human, even though it isn't
-      // continuous (gateway/calibration.py).
-      document.getElementById('gauge-fresh').style.width = `${data.freshwater_level}%`;
+      const freshLevel = data.tanks.freshWater.currentLevel;
+      const blackLevel = data.tanks.blackWater.currentLevel;
+      const freshLiters = tankLiters('freshwater', freshLevel);
+      const blackLiters = tankLiters('blackwater', blackLevel);
+      document.getElementById('gauge-fresh').style.width = `${freshLevel * 100}%`;
       document.getElementById('value-fresh').textContent =
-        data.freshwater_liters !== null ? `${data.freshwater_liters} L` : `${data.freshwater_level}%`;
-      document.getElementById('gauge-black').style.width = `${data.blackwater_level}%`;
+        freshLiters !== null ? `${freshLiters} L` : `${Math.round(freshLevel * 100)}%`;
+      document.getElementById('gauge-black').style.width = `${blackLevel * 100}%`;
       document.getElementById('value-black').textContent =
-        data.blackwater_liters !== null ? `${data.blackwater_liters} L` : `${data.blackwater_level}%`;
+        blackLiters !== null ? `${blackLiters} L` : `${Math.round(blackLevel * 100)}%`;
+      document.getElementById('tv-gauge-fresh').style.width = `${freshLevel * 100}%`;
+      document.getElementById('tv-value-fresh').textContent =
+        freshLiters !== null ? `${freshLiters} L` : `${Math.round(freshLevel * 100)}%`;
+      document.getElementById('tv-gauge-black').style.width = `${blackLevel * 100}%`;
+      document.getElementById('tv-value-black').textContent =
+        blackLiters !== null ? `${blackLiters} L` : `${Math.round(blackLevel * 100)}%`;
+
       const starterVoltage = data.electrical.batteries.starter.voltage;
       const houseVoltage = data.electrical.batteries.house.voltage;
       document.getElementById('value-starter').textContent = `${starterVoltage.toFixed(2)} V`;
@@ -536,27 +637,22 @@
       document.getElementById('cal-house-voltage').textContent = `${houseVoltage.toFixed(2)} V`;
     }
 
-    async function pollSensors() {
+    async function fetchSensorsSnapshot() {
       try {
         const resp = await fetch('/sensors');
-        if (resp.ok) renderSensors(await resp.json());
+        if (resp.ok) {
+          lastSensors = await resp.json();
+          renderSensors(lastSensors);
+        }
       } catch (err) {
         // sidebar just keeps showing the last good reading
       }
-      setTimeout(pollSensors, SENSOR_POLL_MS);
     }
-    pollSensors();
 
-    let lastEtag = null;
-
-    async function poll() {
+    async function fetchStatusSnapshot() {
       try {
-        const headers = lastEtag ? { 'If-None-Match': lastEtag } : {};
-        const resp = await fetch('/status', { headers });
-        if (resp.status === 304) {
-          // server confirmed nothing changed — no body was even sent
-        } else if (resp.ok) {
-          lastEtag = resp.headers.get('ETag');
+        const resp = await fetch('/status');
+        if (resp.ok) {
           renderControl(await resp.json());
         } else {
           setStateLine('state', `state: error ${resp.status}`);
@@ -566,9 +662,72 @@
         setStateLine('state', 'state: unreachable');
         setStateLine('essentials-state', 'state: unreachable');
       }
-      setTimeout(poll, POLL_MS);
     }
-    seedConfigFromServer().then(poll);
+
+    // Applies electrical.switches.*, electrical.batteries.*, and tanks.*
+    // deltas onto lastStatus/lastSensors in place, re-rendering whichever
+    // was actually touched by this message.
+    function applyDelta(updates) {
+      let statusChanged = false;
+      let sensorsChanged = false;
+      for (const update of updates) {
+        for (const { path, value } of update.values) {
+          const sw = path.match(/^electrical\.switches\.(.+)\.state$/);
+          if (sw && lastStatus && lastStatus.electrical.switches[sw[1]]) {
+            lastStatus.electrical.switches[sw[1]].state = value;
+            statusChanged = true;
+            continue;
+          }
+          const bat = path.match(/^electrical\.batteries\.(starter|house)\.voltage$/);
+          if (bat && lastSensors) {
+            lastSensors.electrical.batteries[bat[1]].voltage = value;
+            sensorsChanged = true;
+            continue;
+          }
+          const tank = path.match(/^tanks\.(freshWater|blackWater)\.currentLevel$/);
+          if (tank && lastSensors) {
+            lastSensors.tanks[tank[1]].currentLevel = value;
+            sensorsChanged = true;
+            if (tankSoundEnabled) playTankChangeSound();
+          }
+          // else: delta arrived before its matching initial snapshot -- the
+          // REST fetch below will supersede it moments later regardless.
+        }
+      }
+      if (statusChanged) renderControl(lastStatus);
+      if (sensorsChanged) renderSensors(lastSensors);
+    }
+
+    const RECONNECT_MS = 1000;
+
+    function connectSubscribe() {
+      const proto = location.protocol === 'https:' ? 'wss:' : 'ws:';
+      const ws = new WebSocket(`${proto}//${location.host}/subscribe`);
+      ws.onopen = () => {
+        ws.send(JSON.stringify({
+          context: 'vessels.self',
+          subscribe: [
+            { path: 'electrical.switches.*' },
+            { path: 'electrical.batteries.*' },
+            { path: 'tanks.*' },
+          ],
+        }));
+        // reconnect or first connect -- deltas alone can't recover a missed gap
+        fetchStatusSnapshot();
+        fetchSensorsSnapshot();
+      };
+      ws.onmessage = (msg) => {
+        const delta = JSON.parse(msg.data);
+        if (delta.updates) applyDelta(delta.updates);
+      };
+      ws.onerror = () => ws.close(); // onclose below handles the actual reconnect
+      ws.onclose = () => {
+        setStateLine('state', 'state: unreachable');
+        setStateLine('essentials-state', 'state: unreachable');
+        setTimeout(connectSubscribe, RECONNECT_MS);
+      };
+    }
+    seedConfigFromServer().then(connectSubscribe);
 
     // -- diagnostics: live window/screen/storage report --
     function testStorage(storage) {

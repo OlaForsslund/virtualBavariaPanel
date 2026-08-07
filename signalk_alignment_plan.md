@@ -83,17 +83,21 @@ with no Signal K equivalent — left untouched.
 |---|---|
 | `starter_voltage`, `house_voltage` | `electrical: { batteries: { starter: { voltage }, house: { voltage } } } }` |
 
-### `GET /sensors` — tanks: **deferred, not part of this pass**
+### `GET /sensors` — tanks: **resolved 2026-08-07, no longer deferred**
 
-`freshwater_level`/`freshwater_liters`/`blackwater_level`/`blackwater_liters`
-stay exactly as they are for now. Signal K wants `tanks.freshWater.0.
-currentLevel` as a 0–1 ratio of total capacity — this gateway has no single
-capacity figure (tank cross-section isn't uniform, `calibration.py` stores
-per-level liters directly, confirmed non-proportional: 38L/31L/45L across
-three quarters of the same tank). Renaming this requires deciding first,
-not silently: either add a nominal capacity and accept the ratio is
-approximate, or keep reporting liters directly and accept tanks stay
-non-standard. **Open — decide separately, not folded into this pass.**
+Was blocked here on a wrong assumption, corrected after actually checking
+the schema: `currentLevel` ("Level of fluid in tank 0-100%", units
+"ratio") has **no required relationship to `capacity`** — they're separate,
+independent, both-optional properties. So there was never a need for a
+nominal capacity figure; `currentLevel` is just the sender's own reading,
+unit-converted. Implemented as `tanks.freshWater.currentLevel` /
+`tanks.blackWater.currentLevel` = `snapshot.*_level / 100` — exact for the
+rod/float sensor's fixed 0/25/50/75/100 steps, no precision loss. The
+liters conversion (`calibration.tank_liters()`, previously computed here)
+moved client-side (`webapp/index.html`'s `tankLiters()`), reading the same
+per-level calibration table the Sensor calibration form already edits —
+`calibration.tank_liters()` itself is untouched, still tested, just no
+longer called from this handler.
 
 ### `POST /circuits/{name}` — endpoint path/shape: unchanged in this pass
 
@@ -130,11 +134,84 @@ as a candidate feature, not part of this pass.
 
 - Delta/update envelope, `context`/`source`/`timestamp` — not until a real
   plugin exists.
-- `signalk-server`, the plugin itself, WebSocket subscribe — later,
-  independent decisions, not blocked by anything found so far (§3).
+- `signalk-server`, the plugin itself — later, independent decisions, not
+  blocked by anything found so far (§3). WebSocket subscribe is designed
+  (§7) but not yet implemented.
 - `/calibration`, `/config`, `/diagnostics`, `/system/restart` — stay
   bespoke; `/config` might move to Signal K's Application Data API later
   *if* security/auth is adopted for other reasons.
 - Victron BLE integration into this gateway/plugin — separate track,
   prototyped independently in `~/victronReadout`. Revisit once this pass is
   settled.
+
+## 7. WebSocket subscribe — implemented 2026-08-07
+
+`gateway/web.py`'s `/subscribe` + `webapp/index.html`'s `connectSubscribe()`.
+Hardware-verified live on the boat: initial full dump on connect, exactly
+one delta per actual change (checked via `/circuits/RESERVED1` toggle,
+reverted after), gateway restart mid-session glitch-free (relay state
+unchanged across restart, matching the earlier field-rename verification).
+
+One scope call made while implementing, not decided in advance: the WS
+stream includes `electrical.batteries.*` deltas (server-side, cheap, and
+proven ready for a future Victron source at the same path — see the
+multiple-sources note below), but the webapp doesn't apply them yet — the
+sensors sidebar still uses its own REST poll (`pollSensors`, unchanged),
+since that data only refreshes server-side every `SENSOR_POLL_PERIOD` (5s)
+regardless of transport, so WebSocket buys no latency win there. Tanks
+were never part of the WS stream (§4's deferred decision still applies) and
+still poll via REST only.
+
+**Decision: the gateway's own WebSocket speaks a subset of Signal K's real
+wire protocol** (subscribe message + delta message shapes), not a bespoke
+push format. Reasoning, since it reverses the earlier "don't build the
+envelope ahead of a real consumer" stance (§1): that caution applies when
+*nothing* would actually consume the shape yet. Here the consumer is real
+and immediate — our own webapp — so replicating the wire shape has an
+immediate payoff: one client-side function serves both this gateway (relay/
+tank/panel-battery data, forever — that data never moves to `signalk-server`)
+*and* a real `signalk-server` later (Victron data, once the plugin exists),
+differing only by URL and which paths are subscribed to. Scoped to just
+what the webapp needs — one context (`vessels.self`), flat path/value
+deltas — not the full spec (multi-vessel, metadata registration,
+notifications).
+
+**Reconnection is the client's job, not the protocol's.** Plain
+`WebSocket` has no auto-retry. Required on `onclose`/`onerror`:
+retry after a short delay, re-send the subscribe message (a new connection
+remembers nothing), and re-fetch a full REST snapshot before trusting deltas
+again — deltas only carry *changes*, so anything that changed during the
+disconnected gap is otherwise silently missed. True regardless of which
+server it's talking to.
+
+**Multiple sources for the same path — real for us, not hypothetical.**
+Both the panel's own sensor and (once integrated) the Victron SmartShunt
+report house battery voltage. Signal K's answer, confirmed against the
+spec: same path, not separate paths. The full/REST model keeps every
+source's value under a `values` object keyed by source id, with a top-level
+`value`/`$source` showing whichever one is currently "selected" (most
+recent by default). Over the delta stream this arrives as **separate
+messages**, each tagged with its own `source` — so naively doing
+`state[path] = value` on every incoming delta means the last one to arrive
+silently wins, flapping between two readings depending on timing rather
+than a deliberate choice. Two ways to handle it, decide when Victron
+integration actually happens: (a) subscribe to one specific source only
+(spec supports `path.values[sourceId]` addressing, so the server does the
+filtering), or (b) receive both and let the webapp choose which to display.
+Leaning (a) — simpler client code, decision made once at subscribe time
+instead of on every message.
+
+## 8. Faster sensor polling + tanks over WebSocket — implemented 2026-08-07
+
+Prompted by wanting near-real-time tank readings for manual tank
+measurements (2026-08-08). Hardware-verified live:
+
+- `/subscribe` now includes `tanks.*` deltas (`_tank_values()` in
+  `gateway/web.py`), and the webapp actually consumes them now (unlike
+  `electrical.batteries.*`, which was sent-but-unused per §7) — with
+  polling at 1s instead of 5s, the "WebSocket buys no latency win" argument
+  that justified deferring sensors-over-WS no longer holds, so both
+  batteries and tanks were wired into `applyDelta`/`renderSensors` at the
+  same time. `pollSensors()`'s standalone REST timer is gone; `/sensors`
+  is now REST-for-initial/reconnect-snapshot + WS-for-live-updates only,
+  matching switches' pattern exactly.
