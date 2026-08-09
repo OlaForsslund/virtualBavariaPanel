@@ -290,8 +290,8 @@
 
           <!-- water, clipped to cylinder silhouette -->
           <g clip-path="url(#cylClip)">
-            <rect id="cylFillUncertain" x="52" width="116" y="404" height="0" fill="url(#hatchWaterCyl)"/>
-            <rect id="cylFillSolid" x="52" width="116" y="404" height="0" fill="url(#cylWaterWall)"/>
+            <path id="cylFillUncertain" fill="url(#hatchWaterCyl)"/>
+            <path id="cylFillSolid" fill="url(#cylWaterWall)"/>
             <ellipse id="cylSurfaceSolid" cx="110" cy="404" rx="58" ry="14" fill="var(--water-light)" opacity="0"/>
           </g>
           <ellipse id="cylSurfaceUncertain" cx="110" cy="404" rx="58" ry="14" fill="url(#hatchWaterCyl)" stroke="var(--water-light)" stroke-width="1.25" opacity="0"/>
@@ -425,6 +425,22 @@
     });
   }
 
+  // ---- elliptical-arc-topped fill paths (cylinder view) ----
+  // The visible "near" edge of a surface ellipse is its lower half (a downward "smile" arc).
+  // Fill tops follow that same arc so they meet the surface caps with no seam.
+  const CYL_RX = 58, CYL_RY = 14;
+  function archTop(cx, rx, ry, cy){
+    return `M${(cx-rx).toFixed(2)},${cy.toFixed(2)} A${rx},${ry} 0 0,1 ${(cx+rx).toFixed(2)},${cy.toFixed(2)}`;
+  }
+  // Flat bottom (rigid tank floor / rim) — used for the solid fill, which always runs down to CYL_BOTTOM.
+  function bandPathFlatBottom(cx, rx, ry, topCy, bottomY){
+    return `${archTop(cx,rx,ry,topCy)} L${(cx+rx).toFixed(2)},${bottomY.toFixed(2)} L${(cx-rx).toFixed(2)},${bottomY.toFixed(2)} Z`;
+  }
+  // Arc bottom — used for the uncertain band, whose bottom edge meets the solid fill's curved top with no gap.
+  function bandPathArcBottom(cx, rx, ry, topCy, bottomCy){
+    return `${archTop(cx,rx,ry,topCy)} L${(cx+rx).toFixed(2)},${bottomCy.toFixed(2)} A${rx},${ry} 0 0,0 ${(cx-rx).toFixed(2)},${bottomCy.toFixed(2)} Z`;
+  }
+
   function setLevel(level){
     buttons.forEach(b => b.classList.toggle('active', Number(b.dataset.level) === level));
     signalValue.textContent = level + '%';
@@ -451,22 +467,19 @@
 
     // ---- cylinder fills ----
     const cylLevel = cylYFor(level);
-    cylFillUncertain.setAttribute('fill', 'url(#hatchWaterCyl)');
-    cylFillSolid.setAttribute('y', cylLevel);
-    cylFillSolid.setAttribute('height', CYL_BOTTOM - cylLevel);
     cylSurfaceSolid.setAttribute('cy', cylLevel);
     cylSurfaceSolid.setAttribute('opacity', level === 0 ? 0 : 1);
     cylBaseCap.setAttribute('fill', level === 0 ? 'url(#hatchWaterCyl)' : 'url(#cylWaterWall)');
+    cylFillSolid.setAttribute('d', bandPathFlatBottom(110, CYL_RX, CYL_RY, cylLevel, CYL_BOTTOM));
 
     if(level === 100){
-      cylFillUncertain.setAttribute('height', 0);
-      cylFillUncertain.setAttribute('y', cylLevel);
+      cylFillUncertain.setAttribute('d', '');
       cylSurfaceUncertain.setAttribute('opacity', 0);
     } else {
       const cylNext = cylYFor(next);
-      cylFillUncertain.setAttribute('y', cylNext);
-      cylFillUncertain.setAttribute('height', cylLevel - cylNext);
-      cylSurfaceUncertain.setAttribute('cy', cylNext + SURFACE_NUDGE);
+      const uncertainTop = cylNext + SURFACE_NUDGE;
+      cylFillUncertain.setAttribute('d', bandPathArcBottom(110, CYL_RX, CYL_RY, uncertainTop, cylLevel));
+      cylSurfaceUncertain.setAttribute('cy', uncertainTop);
       cylSurfaceUncertain.setAttribute('stroke', 'var(--water-light)');
       cylSurfaceUncertain.setAttribute('opacity', 1);
     }
