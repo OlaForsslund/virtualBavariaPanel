@@ -89,7 +89,7 @@
     pointer-events: none;
   }
   #chrome-strip {
-    height: 26px;
+    height: 23px;
     display: flex;
     align-items: center;
     padding: 0 10px;
@@ -148,7 +148,7 @@
   }
   #data-pane {
     flex: none;
-    width: 160px;
+    width: 171px;
     display: flex;
     align-items: center;
     justify-content: center;
@@ -191,13 +191,13 @@
 
   <div id="stage">
     <div id="screen">
-      <div id="chrome-strip">Zeus3 7 — 1024&times;600, 26px chrome</div>
+      <div id="chrome-strip">Zeus3 7 — 1024&times;600, 23px chrome</div>
       <div id="body-row">
-        <div id="ap-pane"><span>expand/contract autopilot</span></div>
+        <div id="ap-pane"></div>
         <div class="border" id="border-l"></div>
         <div id="active-row"></div>
         <div class="border" id="border-r"></div>
-        <div id="data-pane"><span>data</span></div>
+        <div id="data-pane"></div>
       </div>
       <div id="ap-photo"></div>
     </div>
@@ -210,22 +210,18 @@
     // AP_PANEL, BORDER_*, and DATA are on-screen visual estimates that
     // close the 1024px budget exactly for all four states.
     const HEIGHT = 574;
-    const AP_COLLAPSED = 48;
-    const AP_EXPANDED = 48 + 160;
-    const DATA = 160;
+    const AP_COLLAPSED = 50;
+    const AP_EXPANDED = 50 + 161;
+    const DATA = 171;
     const ACTIVE = {
       collapsed: { single: 803, paneA: 398, divider: 7, paneB: 398 },
       expanded: { single: 642, paneA: 318, divider: 6, paneB: 318 },
     };
-    const BORDER_L = { collapsed: 6, expanded: 7 };
-    const BORDER_R = 7;
-
+    
     const STATE_KEY = 'vbp.mfdPreview.state';
     const TARGET_KEY = 'vbp.mfdPreview.targetUrl';
 
-    const apPane = document.getElementById('ap-pane');
-    const borderL = document.getElementById('border-l');
-    const borderR = document.getElementById('border-r');
+    const apPane = document.getElementById('ap-pane');    
     const apPhoto = document.getElementById('ap-photo');
     const activeRow = document.getElementById('active-row');
     const dims = document.getElementById('dims');
@@ -254,12 +250,10 @@
       const active = ACTIVE[key];
 
       apPane.style.width = `${apExpanded ? AP_EXPANDED : AP_COLLAPSED}px`;
-      borderL.style.width = `${BORDER_L[key]}px`;
-      borderR.style.width = `${BORDER_R}px`;
-      // Only the expanded state has its own reference photo (215x600,
-      // autopilot panel + left border) -- collapsed relies on the base
+          // Only the expanded state has its own reference photo (215x600,
+      // autopilot panel ) -- collapsed relies on the base
       // 1024x600 photo, which is already correct for that column.
-      apPhoto.style.width = apExpanded ? `${AP_EXPANDED + BORDER_L.expanded}px` : '0';
+      apPhoto.style.width = apExpanded ? `${AP_EXPANDED}px` : '0';
 
       activeRow.innerHTML = '';
       let summary;

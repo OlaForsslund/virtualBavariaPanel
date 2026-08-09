@@ -38,7 +38,7 @@ lets you size mockups without the physical MFD in hand.
 
 - Physical screen: **1024 × 600** (`screen.width`/`screen.height`,
   constant regardless of app layout).
-- MFD chrome overhead is a constant **26px of height**.
+- MFD chrome overhead is a constant **20px of height + 2x3px borders = 26px**.
 - The app area can be split in half vertically and horizontally for up to
   4 simultaneous views. In addition, the autopilot pane can enter from the
   left, further limiting the available horizontal space.
