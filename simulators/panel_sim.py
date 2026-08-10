@@ -2,7 +2,8 @@
 
 Run: python -m simulators.panel_sim [--state CABIN_LIGHTS1,WATER]
 Interactive: type a relay name (or unique prefix) + Enter to "press" its
-button; empty line lists the current state; Ctrl-C quits.
+button; `tank <fresh|black> <0|25|50|75|100>` sets a tank level; empty
+line lists the current state; Ctrl-C quits.
 """
 
 import argparse
@@ -44,6 +45,14 @@ class PanelSim(SimNode):
     def sdo_read(self, index: int, sub: int) -> bytes:
         if (index, sub) == (0x1008, 0):
             return b"SIMP"
+        if (index, sub) == (constants.TANK_FRESHWATER_INDEX, constants.TANK_FRESHWATER_SUB):
+            return bytes([self.core.freshwater_level])
+        if (index, sub) == (constants.TANK_BLACKWATER_INDEX, constants.TANK_BLACKWATER_SUB):
+            return bytes([self.core.blackwater_level])
+        if (index, sub) == (constants.BATTERY_STARTER_INDEX, constants.BATTERY_STARTER_SUB):
+            return PanelCore.STARTER_RAW.to_bytes(2, "little")
+        if (index, sub) == (constants.BATTERY_HOUSE_INDEX, constants.BATTERY_HOUSE_SUB):
+            return PanelCore.HOUSE_RAW.to_bytes(2, "little")
         raise SdoAbort(ABORT_NO_OBJECT)
 
     def sdo_write(self, index: int, sub: int, data: bytes) -> None:
@@ -59,6 +68,14 @@ def parse_state(names: str) -> int:
     return bitmap
 
 
+TANK_ALIASES = {
+    "FRESH": "freshwater",
+    "FRESHWATER": "freshwater",
+    "BLACK": "blackwater",
+    "BLACKWATER": "blackwater",
+}
+
+
 def button_cli(core: PanelCore) -> None:
     while True:
         try:
@@ -67,6 +84,24 @@ def button_cli(core: PanelCore) -> None:
             return
         if not entry:
             log.info("state: %s", ", ".join(relay_names(core.state)) or "all off")
+            log.info(
+                "tanks: freshwater=%d%% blackwater=%d%%",
+                core.freshwater_level,
+                core.blackwater_level,
+            )
+            continue
+        parts = entry.split()
+        if parts[0] == "TANK":
+            tank_name = parts[1] if len(parts) > 1 else ""
+            level_str = parts[2] if len(parts) > 2 else ""
+            if len(parts) != 3 or tank_name not in TANK_ALIASES or not level_str.isdigit() \
+                    or int(level_str) not in PanelCore.TANK_LEVELS:
+                log.info("usage: tank <fresh|black> <%s>", "|".join(str(l) for l in PanelCore.TANK_LEVELS))
+                continue
+            tank = TANK_ALIASES[tank_name]
+            level = int(level_str)
+            core.set_tank(tank, level)
+            log.info("%s tank -> %d%%", tank, level)
             continue
         matches = [n for n in constants.RELAYS if n.startswith(entry)]
         if len(matches) == 1:

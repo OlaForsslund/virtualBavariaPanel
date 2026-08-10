@@ -16,27 +16,45 @@
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <title>Virtual Bavaria Panel</title>
   <style>
-    /* Dark theme matching the B&G Zeus MFD's own chrome: near-black
-       background, dark-gray tiles, light-gray text, lime-green for
-       live/active state (matches the MFD's own instrument readout color). */
-    :root {
-      --bg: #1c1c1e;
-      --surface: #2a2a2c;
-      --surface-hover: #38383a;
-      --border: #3a3a3c;
-      --text-primary: #f2f2f2;
-      --text-secondary: #9a9a9c;
-      --accent: #7ed321;
-      --accent-text: #10210a;
+    @font-face {
+      font-family: 'DejaVu Sans';
+      src: url('/font/DejaVuSans.ttf') format('truetype');
+      font-weight: normal;
     }
+    @font-face {
+      font-family: 'DejaVu Sans';
+      src: url('/font/DejaVuSans-Bold.ttf') format('truetype');
+      font-weight: bold;
+    }
+    /* Theme : deep navy background, brass-panel tiles, brass for live/active state. */
+    :root {
+      --bg: #061826;
+      --surface: #0E2B40;
+      --surface-hover: #123249;
+      --border: rgba(201,154,75,0.25);
+      --text-primary: #E9EDE7;
+      --text-secondary: #7C93A3;
+      --water-deep: #175577;
+      --water-light: #3FA9D6;
+      --brass: #C99A4B;
+      --brass-dim: #8C6B34;
+      --accent: var(--brass);
+      --accent-text: #1a1206;
+    }
+    /* Belt-and-braces: the narrowest MFD split (autopilot expanded, quarter
+       pane, ~318px -- mfd_display_notes-zeus3-7.md) leaves very little room
+       for the nav labels, and a stray overflow anywhere shouldn't be able to
+       put a horizontal scrollbar under the MFD's own chrome. */
+    html, body { overflow-x: hidden; }
     body {
-      font-family: -apple-system, "Segoe UI", Roboto, sans-serif;
+      /* The Open soruce font, used by B&G MFD Gui, to keep the UI consistent */
+      font-family: 'DejaVu Sans', -apple-system, "Segoe UI", Roboto, sans-serif;
       margin: 0;
-      background-color: var(--bg);
-      background-image: url("/SailWallpaper-600.jpg");
-      background-size: cover;
-      background-position: center;
-      background-attachment: fixed;
+      /* No background-attachment:fixed on this gradient -- it forces a full
+         repaint on scroll instead of a cheap compositor move on exactly
+         this class of embedded/older Chromium, and a plain 2-stop gradient
+         looks identical either way. */
+      background: linear-gradient(180deg, var(--surface-hover), var(--bg));
       color: var(--text-primary);
     }
     #top-bar {
@@ -46,34 +64,112 @@
       margin-bottom: 12px;
       border-bottom: 1px solid var(--border);
     }
-    nav { display: flex; border-bottom: 1px solid var(--border); }
-    nav button {
+    /* "<< PAGE >>" header: #nav-label shows the current page, the arrows
+       step through SWIPE_VIEWS (same order as the swipe gesture below --
+       both call the same stepView()). */
+    nav { display: flex; align-items: stretch; border-bottom: 1px solid var(--border); }
+    #nav-label {
       flex: 1;
-      padding: 14px;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      min-width: 0;
+      padding: 14px 4px;
       font-size: 1em;
+      text-transform: uppercase;
+      letter-spacing: 0.03em;
+      background: var(--surface);
+      color: var(--text-primary);
+      font-weight: bold;
+    }
+    .nav-arrow {
+      flex: 0 0 52px;
       border: none;
       background: var(--surface);
       color: var(--text-primary);
+      font-size: 40px;
       cursor: pointer;
     }
-    nav button.active { background: var(--accent); color: var(--accent-text); font-weight: bold; }
+    .nav-arrow:disabled { opacity: 0.3; cursor: default; }
+    /* Worst case per mfd_display_notes-zeus3-7.md: ~318px, quarter split,
+       autopilot expanded. */
+    @media (max-width: 360px) {
+      #nav-label { font-size: 0.8em; padding: 10px 2px; letter-spacing: 0.01em; }
+      .nav-arrow { flex-basis: 40px; font-size: 40px; }
+    }
+    /* Sliding carousel for the main pages: the track is SWIPE_VIEWS.length
+       viewports wide, panes sit side by side, and navigating just moves the
+       track -- CSS transitions the transform for both swipe and
+       arrow-click. Entering fresh from a sub-view (Diagnostics etc.) skips
+       the animation via .no-anim (see setSwipeIndex()), so it doesn't slide
+       in from wherever the track happened to be left.
+
+       padding:0 overrides the shared .view rule -- each .pane carries its
+       own 16px instead, so main pages match the sub-views' inset exactly.
+
+       Height is set by JS (syncSwipeHeight()) to match whichever pane is
+       actually showing -- otherwise the flex track's height (needed to fit
+       every pane side by side) is set by the tallest one regardless of
+       which is visible, leaving dead space under shorter pages and risking
+       a vertical scrollbar. overflow:hidden (both axes) clips the rest once
+       height is managed explicitly. No transition on height: it's a layout
+       property (forces reflow+paint every frame) unlike the transform
+       slide, which is compositor-only. */
+    #swipe-viewport { overflow: hidden; position: relative; padding: 0; }
+    #swipe-track {
+      display: flex;
+      width: 400%; /* SWIPE_VIEWS.length panes -- keep in sync if that array's length changes */
+      transition: transform 260ms ease;
+    }
+    #swipe-track.no-anim { transition: none; }
+    #swipe-track > .pane {
+      flex: 0 0 25%;
+      width: 25%;
+      box-sizing: border-box;
+      padding: 16px;
+    }
     .view { display: none; padding: 16px; }
     .view.active { display: block; }
+    /* Relay-button: on/off is carried by the LED dot plus a subtle background/shadow shift. */
     button.circuit {
-      display: block;
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 14px;
       width: 100%;
-      max-width: 320px;
+      max-width: 280px;
       box-sizing: border-box;
       font-size: 1.2em;
+      letter-spacing: 0.02em;
       padding: 10px 16px;
       margin: 6px 0;
-      border: none;
+      border: 1px solid rgba(201,154,75,0.35);
       border-radius: 8px;
       cursor: pointer;
-      background: var(--surface);
+      background: linear-gradient(180deg, rgba(255,255,255,0.06), rgba(255,255,255,0.01));
       color: var(--text-primary);
+      box-shadow: 0 1px 0 rgba(255,255,255,0.05) inset;
+      transition: background 0.1s, box-shadow 0.1s, border-color 0.1s;
     }
-    button.circuit.on { background: var(--accent); color: var(--accent-text); font-weight: bold; }
+    button.circuit.on {
+      border-color: rgba(201,154,75,0.6);
+      background: rgba(0,0,0,0.18);
+      box-shadow: inset 0 2px 3px rgba(0,0,0,0.5);
+    }
+    .circuit-led {
+      width: 14px;
+      height: 8px;
+      border-radius: 2px;
+      flex: none;
+      background: #1c2b22;
+      border: 1px solid #2e4438;
+      transition: background 0.15s, box-shadow 0.15s, border-color 0.15s;
+    }
+    button.circuit.on .circuit-led {
+      background: #0eff1e;
+      border-color: #8FE8B0;
+      box-shadow: 0 0 5px 1.5px rgba(111,207,151,0.8);
+    }
     button.action-btn {
       display: inline-block;
       width: auto;
@@ -94,12 +190,13 @@
     table.diag td:first-child { color: var(--text-secondary); white-space: nowrap; }
     label.cfg-row { display: block; padding: 6px 0; font-size: 1.1em; color: var(--text-primary); }
     .control-layout { display: flex; align-items: flex-start; gap: 56px; }
-    /* Sensor sidebar: only worth showing when there's room next to the
-       circuit buttons — full/near-full screen — not in the MFD's narrower
-       split-screen layouts (mfd_display_notes-zeus3-7.md). */
-    #sensors-panel { display: none; }
-    @media (min-width: 700px) {
-      #sensors-panel {
+    /* Sensor sidebar: a class, since it's mounted on multiple pages, shown
+       only when there's room next to the circuit buttons. 620px clears the
+       single-pane autopilot-expanded width (642px) while still excluding
+       every split width (max 398px) -- mfd_display_notes-zeus3-7.md. */
+    .sensors-panel { display: none; }
+    @media (min-width: 620px) {
+      .sensors-panel {
         display: block;
         flex: 0 0 200px;
         background: var(--surface);
@@ -107,18 +204,31 @@
         padding: 12px 16px;
       }
     }
-    #sensors-panel h3 {
+    /* Headings uppercase, matching the MFD's own field labels (DEPTH, HDG,
+       WPT BRG, etc. in the B&G sidebar) -- webapp/dev/screenshots/. Item
+       names/values (nav tabs, circuit names) stay as-is; the MFD's own tile
+       labels (Chart, Waypoints, ...) aren't uppercased either. */
+    h3 {
+      text-transform: uppercase;
+      letter-spacing: 0.04em;
+      color: var(--brass);
+      font-weight: normal;
+    }
+    .sensors-panel h3 {
       margin: 0 0 12px;
       font-size: 1em;
       color: var(--text-secondary);
-      font-weight: normal;
     }
     .gauge { margin-bottom: 14px; }
-    .gauge-label { font-size: 0.9em; color: var(--text-secondary); margin-bottom: 4px; }
-    .gauge-bar { background: var(--border); border-radius: 6px; height: 14px; overflow: hidden; }
+    .gauge-label { font-size: 0.9em; color: var(--text-secondary); margin-bottom: 4px; text-transform: uppercase; letter-spacing: 0.03em; }
+    .gauge-bar { background: var(--surface-hover); border-radius: 6px; height: 14px; overflow: hidden; }
     .gauge-fill { background: var(--accent); height: 100%; transition: width 0.3s; }
-    #gauge-fresh { background: #3ba7ff; }
     .gauge-value { font-size: 0.85em; color: var(--text-secondary); margin-top: 2px; text-align: right; }
+    /* Freshwater cylinder gauge -- see initTankCylinder()/setTankCylinderLevel().
+       Same viewBox as the design source; scaled down to fit the sidebar. */
+    .tank-cylinder-mount svg { width: 100%; max-width: 170px; height: auto; overflow: visible; display: block; margin: 0 auto; }
+    .tank-cylinder-mount .switch-dot { transition: fill 300ms, stroke 300ms; }
+    .tank-cylinder-mount .cyl-base-cap { transition: fill 300ms; }
     .battery-row {
       display: flex;
       justify-content: space-between;
@@ -126,41 +236,89 @@
       padding: 6px 0;
       border-top: 1px solid var(--border);
     }
+    .battery-row span:first-child { text-transform: uppercase; letter-spacing: 0.03em; color: var(--text-secondary); }
   </style>
 </head>
 <body>
   <nav>
-    <button data-view="essentials" class="active">Essentials</button>
-    <button data-view="control">All Controls</button>
-    <button data-view="config">Settings</button>
+    <button id="nav-prev" class="nav-arrow" type="button" aria-label="Previous page">&laquo;</button>
+    <span id="nav-label"></span>
+    <button id="nav-next" class="nav-arrow" type="button" aria-label="Next page">&raquo;</button>
   </nav>
 
-  <section id="view-essentials" class="view active">
-    <p id="essentials-state">state: loading&hellip;</p>
-    <div id="essentials-circuits">loading&hellip;</div>
-  </section>
+  <div id="swipe-viewport" class="view active">
+    <div id="swipe-track">
+      <section id="view-essentials" class="pane">
+        <p id="essentials-state">state: loading&hellip;</p>
+        <div class="control-layout">
+          <div id="essentials-circuits">loading&hellip;</div>
+          <aside class="sensors-panel">
+            <h3>Tanks &amp; Batteries</h3>
+            <div class="gauge">
+              <div class="gauge-label">Freshwater</div>
+              <div class="tank-cylinder-mount" id="fresh-cyl-es"></div>
+              <div class="gauge-value" id="es-value-fresh">&mdash;</div>
+            </div>
+            <div class="gauge">
+              <div class="gauge-label">Blackwater</div>
+              <div class="gauge-bar"><div class="gauge-fill" id="es-gauge-black" style="width:0%"></div></div>
+              <div class="gauge-value" id="es-value-black">&mdash;</div>
+            </div>
+            <div class="battery-row"><span>Starter</span><span id="es-value-starter">&mdash;</span></div>
+            <div class="battery-row"><span>House</span><span id="es-value-house">&mdash;</span></div>
+          </aside>
+        </div>
+      </section>
 
-  <section id="view-control" class="view">
-    <p id="state">state: loading&hellip;</p>
-    <div class="control-layout">
-      <div id="circuits">loading&hellip;</div>
-      <aside id="sensors-panel">
+      <section id="view-control" class="pane">
+        <p id="state">state: loading&hellip;</p>
+        <div class="control-layout">
+          <div id="circuits">loading&hellip;</div>
+          <aside class="sensors-panel">
+            <h3>Tanks &amp; Batteries</h3>
+            <div class="gauge">
+              <div class="gauge-label">Freshwater</div>
+              <div class="tank-cylinder-mount" id="fresh-cyl-sb"></div>
+              <div class="gauge-value" id="sb-value-fresh">&mdash;</div>
+            </div>
+            <div class="gauge">
+              <div class="gauge-label">Blackwater</div>
+              <div class="gauge-bar"><div class="gauge-fill" id="sb-gauge-black" style="width:0%"></div></div>
+              <div class="gauge-value" id="sb-value-black">&mdash;</div>
+            </div>
+            <div class="battery-row"><span>Starter</span><span id="sb-value-starter">&mdash;</span></div>
+            <div class="battery-row"><span>House</span><span id="sb-value-house">&mdash;</span></div>
+          </aside>
+        </div>
+      </section>
+
+      <section id="view-sensors" class="pane">
         <h3>Tanks &amp; Batteries</h3>
         <div class="gauge">
           <div class="gauge-label">Freshwater</div>
-          <div class="gauge-bar"><div class="gauge-fill" id="gauge-fresh" style="width:0%"></div></div>
-          <div class="gauge-value" id="value-fresh">&mdash;</div>
+          <div class="tank-cylinder-mount" id="fresh-cyl-sn"></div>
+          <div class="gauge-value" id="sn-value-fresh">&mdash;</div>
         </div>
         <div class="gauge">
           <div class="gauge-label">Blackwater</div>
-          <div class="gauge-bar"><div class="gauge-fill" id="gauge-black" style="width:0%"></div></div>
-          <div class="gauge-value" id="value-black">&mdash;</div>
+          <div class="gauge-bar"><div class="gauge-fill" id="sn-gauge-black" style="width:0%"></div></div>
+          <div class="gauge-value" id="sn-value-black">&mdash;</div>
         </div>
-        <div class="battery-row"><span>Starter</span><span id="value-starter">&mdash;</span></div>
-        <div class="battery-row"><span>House</span><span id="value-house">&mdash;</span></div>
-      </aside>
+        <div class="battery-row"><span>Starter</span><span id="sn-value-starter">&mdash;</span></div>
+        <div class="battery-row"><span>House</span><span id="sn-value-house">&mdash;</span></div>
+      </section>
+
+      <section id="view-config" class="pane">
+        <header id="top-bar">
+          <button class="action-btn" onclick="location.hash='diagnostics'">Diagnostics</button>
+          <button class="action-btn danger" onclick="restartPi()">Restart Pi</button>
+        </header>
+        <p><button class="action-btn" onclick="location.hash='relays'">Circuit visibility</button></p>
+        <p><button class="action-btn" onclick="location.hash='sensor-calibration'">Sensor calibration</button></p>
+        <p><button class="action-btn" onclick="location.hash='tank-settings'">Tank settings</button></p>
+      </section>
     </div>
-  </section>
+  </div>
 
   <section id="view-diagnostics" class="view">
     <header id="top-bar">
@@ -179,16 +337,6 @@
       <tr><td>userAgent</td><td id="d-ua"></td></tr>
     </table>
     <p id="diag-status">state: loading&hellip;</p>
-  </section>
-
-  <section id="view-config" class="view">
-    <header id="top-bar">
-      <button class="action-btn" onclick="location.hash='diagnostics'">Diagnostics</button>
-      <button class="action-btn danger" onclick="restartPi()">Restart Pi</button>
-    </header>
-    <p><button class="action-btn" onclick="location.hash='relays'">Circuit visibility</button></p>
-    <p><button class="action-btn" onclick="location.hash='sensor-calibration'">Sensor calibration</button></p>
-    <p><button class="action-btn" onclick="location.hash='tank-settings'">Tank settings</button></p>
   </section>
 
   <section id="view-relays" class="view">
@@ -220,7 +368,7 @@
     <p><button class="action-btn" id="tank-sound-btn" onclick="toggleTankSound()">Sound at level change: off</button></p>
     <div class="gauge">
       <div class="gauge-label">Freshwater</div>
-      <div class="gauge-bar"><div class="gauge-fill" id="tv-gauge-fresh" style="width:0%"></div></div>
+      <div class="tank-cylinder-mount" id="fresh-cyl-ts"></div>
       <div class="gauge-value" id="tv-value-fresh">&mdash;</div>
     </div>
     <div class="gauge">
@@ -254,23 +402,123 @@
   </section>
 
   <script>
-    // -- nav: one document, four views toggled via location.hash --
-    function showView(name) {
-      document.querySelectorAll('.view').forEach(el => el.classList.remove('active'));
-      document.querySelectorAll('nav button').forEach(el => el.classList.remove('active'));
-      document.getElementById(`view-${name}`).classList.add('active');
-      // Diagnostics has no nav button (reached via Config instead), so this
-      // can legitimately be null -- guard rather than assume a match.
-      const navBtn = document.querySelector(`nav button[data-view="${name}"]`);
-      if (navBtn) navBtn.classList.add('active');
+    // -- nav: "<< PAGE >>" header + swipe, both driving the main pages
+    // (SWIPE_VIEWS) on a sliding carousel track; drill-down sub-views
+    // (diagnostics, relays, sensor calibration, tank settings) aren't part
+    // of that order -- they keep their own "<- Settings" button instead of
+    // the header/swipe.
+    const SWIPE_VIEWS = ['essentials', 'control', 'sensors', 'config'];
+    const VIEW_LABELS = { essentials: 'Essentials', control: 'All Controls', sensors: 'Sensors', config: 'Settings' };
+    const swipeViewport = document.getElementById('swipe-viewport');
+    const swipeTrack = document.getElementById('swipe-track');
+    const navLabel = document.getElementById('nav-label');
+    const navPrev = document.getElementById('nav-prev');
+    const navNext = document.getElementById('nav-next');
+
+    // Sub-views all hang off Settings (only reachable via the Config page),
+    // so the header/arrows treat them as "currently on Settings" for display
+    // and stepping purposes.
+    function mainViewFor(name) {
+      return SWIPE_VIEWS.includes(name) ? name : 'config';
     }
-    document.querySelectorAll('nav button').forEach(btn => {
-      btn.addEventListener('click', () => { location.hash = btn.dataset.view; });
-    });
+
+    // Matches #swipe-viewport's height to whichever pane is actually showing
+    // (see the CSS comment on #swipe-viewport for why that's needed at all).
+    function syncSwipeHeight(index) {
+      swipeViewport.style.height = swipeTrack.children[index].offsetHeight + 'px';
+    }
+    // Re-measures the currently active pane -- for when its own content
+    // changes size (e.g. the circuit list) without a navigation happening.
+    function syncActiveSwipeHeight() {
+      const idx = SWIPE_VIEWS.indexOf(mainViewFor(location.hash.slice(1) || 'essentials'));
+      if (idx !== -1) syncSwipeHeight(idx);
+    }
+
+    function setSwipeIndex(index, animate) {
+      if (!animate) swipeTrack.classList.add('no-anim');
+      swipeTrack.style.transform = `translateX(-${index * 100 / SWIPE_VIEWS.length}%)`;
+      syncSwipeHeight(index);
+      if (!animate) {
+        void swipeTrack.offsetWidth; // force layout so the transform above applies before re-enabling transitions
+        swipeTrack.classList.remove('no-anim');
+      }
+    }
+
+    // Which page's mount div gets the single shared tank-gauge <svg> --
+    // includes tank-settings (a sub-view, not one of SWIPE_VIEWS) since it
+    // shows the gauge too.
+    const TANK_GAUGE_MOUNTS = {
+      essentials: 'fresh-cyl-es',
+      control: 'fresh-cyl-sb',
+      sensors: 'fresh-cyl-sn',
+      'tank-settings': 'fresh-cyl-ts',
+    };
+
+    function showView(name) {
+      if (TANK_GAUGE_MOUNTS[name]) moveTankGaugeTo(TANK_GAUGE_MOUNTS[name]);
+      const isMain = SWIPE_VIEWS.includes(name);
+      const wasMainActive = swipeViewport.classList.contains('active');
+      document.querySelectorAll('.view').forEach(el => el.classList.remove('active'));
+      swipeViewport.classList.toggle('active', isMain);
+      if (isMain) {
+        setSwipeIndex(SWIPE_VIEWS.indexOf(name), wasMainActive);
+      } else {
+        document.getElementById(`view-${name}`).classList.add('active');
+      }
+      const mainName = mainViewFor(name);
+      const idx = SWIPE_VIEWS.indexOf(mainName);
+      navLabel.textContent = VIEW_LABELS[mainName];
+      navPrev.disabled = idx <= 0;
+      navNext.disabled = idx >= SWIPE_VIEWS.length - 1;
+    }
+
+    // Shared by the arrow buttons and the swipe gesture below -- one step in
+    // SWIPE_VIEWS order, clamped at the ends (no wraparound). From a
+    // sub-view this steps relative to Settings (see mainViewFor()).
+    function stepView(delta) {
+      const idx = SWIPE_VIEWS.indexOf(mainViewFor(location.hash.slice(1) || 'essentials'));
+      const next = idx + delta;
+      if (next < 0 || next >= SWIPE_VIEWS.length) return;
+      location.hash = SWIPE_VIEWS[next];
+    }
+    navPrev.addEventListener('click', () => stepView(-1));
+    navNext.addEventListener('click', () => stepView(1));
+
     window.addEventListener('hashchange', () => {
       showView(location.hash.slice(1) || 'essentials');
     });
-    showView(location.hash.slice(1) || 'essentials');
+    // The initial showView() call happens after initTankCylinder(), further
+    // down -- showView() moves tankGaugeEl into place immediately, so it
+    // must already exist by then.
+
+    // The .sensors-panel media query (620px) can show/hide a whole sidebar
+    // on resize -- e.g. the MFD splitting/unsplitting or toggling the
+    // autopilot pane -- which changes the active pane's height without any
+    // of our render functions running, so the swipe track needs its own
+    // resync hook here.
+    window.addEventListener('resize', syncActiveSwipeHeight);
+
+    // -- swipe left/right between the main pages, like the Victron app's
+    // swipeable panes -- shares stepView() with the arrow buttons, so both
+    // trigger the identical sliding animation.
+    const SWIPE_MIN_DISTANCE = 60; // px -- avoids treating a vertical-list drag or a stray touch as a swipe
+    let swipeStartX = null;
+    let swipeStartY = null;
+    document.addEventListener('touchstart', (e) => {
+      if (e.touches.length !== 1) return;
+      swipeStartX = e.touches[0].clientX;
+      swipeStartY = e.touches[0].clientY;
+    }, { passive: true });
+    document.addEventListener('touchend', (e) => {
+      if (swipeStartX === null) return;
+      const touch = e.changedTouches[0];
+      const dx = touch.clientX - swipeStartX;
+      const dy = touch.clientY - swipeStartY;
+      swipeStartX = null;
+      swipeStartY = null;
+      if (Math.abs(dx) < SWIPE_MIN_DISTANCE || Math.abs(dx) < Math.abs(dy)) return;
+      stepView(dx < 0 ? 1 : -1);
+    }, { passive: true });
 
     // -- top bar: hard reload --
     // location.reload(true)'s force-bypass-cache argument has been a no-op
@@ -342,6 +590,183 @@
     const TANK_NAMES = ['freshwater', 'blackwater'];
     const TANK_LEVELS = [0, 25, 50, 75, 100];
 
+    // -- freshwater tank cylinder gauge, ported from
+    // webapp/dev/TankGauge/tank-gauge.html (cylinder view only -- see
+    // DESIGN_NOTES.md, the owner's preferred view; the flat-panel view and
+    // the demo's view-toggle/simulate buttons weren't carried over here).
+    // There's only one freshwater value, so there's only one <svg>:
+    // initTankCylinder() builds it once (tankGaugeEl below), and
+    // moveTankGaugeTo() re-parents that node into whichever page's mount
+    // div is currently active.
+    // CYL_HEIGHT shorter than the 338 design-source default (DESIGN_NOTES.md)
+    // so the whole gauge fits the Control sidebar without pushing it into a
+    // vertical scroll -- CYL_BOTTOM stays anchored so the base cap doesn't
+    // move, only the top (and therefore the viewBox, below) shrinks.
+    const CYL_TOP = 144, CYL_BOTTOM = 404, CYL_HEIGHT = CYL_BOTTOM - CYL_TOP, CYL_RX = 58, CYL_RY = 14;
+    const CYL_SURFACE_NUDGE = 14; // px, cosmetic: keeps the uncertain-range surface off the threshold ring/label
+    const cylYFor = (pct) => CYL_BOTTOM - (pct / 100) * CYL_HEIGHT;
+    // Margin above the rim / below the base cap, in viewBox units.
+    const CYL_VIEWBOX_MARGIN = 14;
+    const CYL_VIEWBOX_TOP = CYL_TOP - CYL_RY - CYL_VIEWBOX_MARGIN;
+    const CYL_VIEWBOX_HEIGHT = (CYL_BOTTOM + CYL_RY + CYL_VIEWBOX_MARGIN) - CYL_VIEWBOX_TOP;
+
+    function tankCylinderSVG() {
+      return `<svg viewBox="-28 ${CYL_VIEWBOX_TOP} 248 ${CYL_VIEWBOX_HEIGHT}" xmlns="http://www.w3.org/2000/svg">
+        <defs>
+          <pattern id="hatchWaterCyl" width="8" height="8" patternTransform="rotate(45)" patternUnits="userSpaceOnUse">
+            <rect width="8" height="8" fill="var(--water-deep)"/>
+            <line x1="0" y1="0" x2="0" y2="8" stroke="var(--water-light)" stroke-width="3" opacity="0.55"/>
+          </pattern>
+          <linearGradient id="cylWall" x1="0" y1="0" x2="1" y2="0">
+            <stop offset="0%" stop-color="#08202f"/>
+            <stop offset="18%" stop-color="#1c4761"/>
+            <stop offset="50%" stop-color="#356f92"/>
+            <stop offset="82%" stop-color="#1c4761"/>
+            <stop offset="100%" stop-color="#08202f"/>
+          </linearGradient>
+          <linearGradient id="cylRim" x1="0" y1="0" x2="1" y2="0">
+            <stop offset="0%" stop-color="#0e2c40"/>
+            <stop offset="50%" stop-color="#1f4e6b"/>
+            <stop offset="100%" stop-color="#0e2c40"/>
+          </linearGradient>
+          <linearGradient id="cylWaterWall" x1="0" y1="0" x2="1" y2="0">
+            <stop offset="0%" stop-color="var(--water-deep)"/>
+            <stop offset="50%" stop-color="var(--water-light)"/>
+            <stop offset="100%" stop-color="var(--water-deep)"/>
+          </linearGradient>
+          <clipPath id="cylClip">
+            <rect x="52" y="${CYL_TOP}" width="116" height="${CYL_HEIGHT}"/>
+            <ellipse cx="110" cy="${CYL_BOTTOM}" rx="58" ry="16"/>
+            <ellipse cx="110" cy="${CYL_TOP}" rx="58" ry="16"/>
+          </clipPath>
+        </defs>
+        <rect x="52" y="${CYL_TOP}" width="116" height="${CYL_HEIGHT}" fill="url(#cylWall)"/>
+        <ellipse id="cylBaseCap" class="cyl-base-cap" cx="110" cy="${CYL_BOTTOM}" rx="58" ry="16" fill="#081b28" stroke="var(--brass-dim)" stroke-width="1.5"/>
+        <g clip-path="url(#cylClip)">
+          <path id="cylFillUncertain" fill="url(#hatchWaterCyl)"/>
+          <path id="cylFillSolid" fill="url(#cylWaterWall)"/>
+          <ellipse id="cylSurfaceSolid" cx="110" cy="${CYL_BOTTOM}" rx="58" ry="14" fill="var(--water-light)" opacity="0"/>
+        </g>
+        <ellipse id="cylSurfaceUncertain" cx="110" cy="${CYL_BOTTOM}" rx="58" ry="14" fill="url(#hatchWaterCyl)" stroke="var(--water-light)" stroke-width="1.25" opacity="0"/>
+        <ellipse cx="110" cy="${CYL_TOP}" rx="58" ry="16" fill="url(#cylRim)" stroke="var(--brass-dim)" stroke-width="1.5"/>
+        <g id="cylThresholds" font-family="'DejaVu Sans', sans-serif" font-size="22" fill="var(--text-secondary)"></g>
+      </svg>`;
+    }
+
+    // Queries within tankGaugeEl, not document.getElementById -- this runs
+    // (via initTankCylinder()) before the gauge is ever mounted into the
+    // live document, and getElementById only finds elements already
+    // attached to it; querySelector works on a still-detached subtree.
+    function buildTankCylinderThresholds() {
+      const g = tankGaugeEl.querySelector('#cylThresholds');
+      TANK_LEVELS.forEach(pct => {
+        const y = cylYFor(pct);
+        if (pct !== 0 && pct !== 100) {
+          const ring = document.createElementNS('http://www.w3.org/2000/svg', 'ellipse');
+          ring.setAttribute('cx', 110); ring.setAttribute('cy', y);
+          ring.setAttribute('rx', 58); ring.setAttribute('ry', 13);
+          ring.setAttribute('fill', 'none');
+          ring.setAttribute('stroke', 'rgba(201,154,75,0.5)');
+          ring.setAttribute('stroke-width', '2');
+          ring.setAttribute('stroke-dasharray', '3,4');
+          g.appendChild(ring);
+        }
+        const dot = document.createElementNS('http://www.w3.org/2000/svg', 'circle');
+        dot.setAttribute('cx', 52); dot.setAttribute('cy', y); dot.setAttribute('r', 6);
+        dot.setAttribute('class', 'switch-dot');
+        dot.setAttribute('id', `cyldot-${pct}`);
+        dot.setAttribute('stroke', 'var(--brass-dim)');
+        dot.setAttribute('stroke-width', '2.5');
+        dot.setAttribute('fill', '#08202F');
+        g.appendChild(dot);
+        const label = document.createElementNS('http://www.w3.org/2000/svg', 'text');
+        label.setAttribute('x', 38); label.setAttribute('y', y + 7);
+        label.setAttribute('text-anchor', 'end');
+        label.setAttribute('id', `cyllabel-${pct}`);
+        label.textContent = pct + '%';
+        g.appendChild(label);
+      });
+    }
+
+    // Threshold labels start as raw %, matching the sensor's actual signal
+    // (DESIGN_NOTES.md). Once per-level liters are calibrated (Tank settings),
+    // swap each label for its liters value -- falls back to % per-level for
+    // any step left uncalibrated. Called after config loads and after saving
+    // new calibration values, not baked in at build time, since these are the
+    // one thing expected to change once real liter data comes in.
+    function updateTankCylinderLabels(tank) {
+      TANK_LEVELS.forEach(pct => {
+        const label = tankGaugeEl.querySelector(`#cyllabel-${pct}`);
+        const raw = document.getElementById(`cal-${tank}-${pct}`).value;
+        label.textContent = raw === '' ? `${pct}%` : `${parseFloat(raw)}L`;
+      });
+    }
+
+    // Elliptical-arc-topped fill paths -- the visible "near" edge of a surface
+    // ellipse is its lower half (a downward "smile" arc); fill tops follow the
+    // same arc so they meet the surface caps with no seam.
+    function cylArchTop(cx, rx, ry, cy) {
+      return `M${(cx - rx).toFixed(2)},${cy.toFixed(2)} A${rx},${ry} 0 0,1 ${(cx + rx).toFixed(2)},${cy.toFixed(2)}`;
+    }
+    function cylBandFlatBottom(cx, rx, ry, topCy, bottomY) {
+      return `${cylArchTop(cx, rx, ry, topCy)} L${(cx + rx).toFixed(2)},${bottomY.toFixed(2)} L${(cx - rx).toFixed(2)},${bottomY.toFixed(2)} Z`;
+    }
+    function cylBandArcBottom(cx, rx, ry, topCy, bottomCy) {
+      return `${cylArchTop(cx, rx, ry, topCy)} L${(cx + rx).toFixed(2)},${bottomCy.toFixed(2)} A${rx},${ry} 0 0,0 ${(cx - rx).toFixed(2)},${bottomCy.toFixed(2)} Z`;
+    }
+
+    // The single shared <svg> node -- built once, detached from any mount
+    // until moveTankGaugeTo() re-parents it into whichever page is active.
+    let tankGaugeEl = null;
+
+    function initTankCylinder() {
+      const temp = document.createElement('div');
+      temp.innerHTML = tankCylinderSVG();
+      tankGaugeEl = temp.firstElementChild; // never attach `temp` itself -- only its child ships
+      buildTankCylinderThresholds();
+    }
+
+    function moveTankGaugeTo(mountId) {
+      const mount = document.getElementById(mountId);
+      if (mount && tankGaugeEl.parentElement !== mount) mount.appendChild(tankGaugeEl);
+    }
+
+    // level must be one of TANK_LEVELS (0/25/50/75/100) -- the sender is a
+    // 4-switch discrete sensor, never a continuous reading.
+    function setTankCylinderLevel(level) {
+      const idx = TANK_LEVELS.indexOf(level);
+      const next = TANK_LEVELS[idx + 1];
+
+      TANK_LEVELS.forEach(pct => {
+        const dot = tankGaugeEl.querySelector(`#cyldot-${pct}`);
+        const lit = pct <= level && !(level === 0 && pct === 0);
+        dot.setAttribute('fill', lit ? 'var(--brass)' : '#08202F');
+        dot.setAttribute('stroke', lit ? 'var(--brass)' : 'var(--brass-dim)');
+      });
+
+      const cylLevel = cylYFor(level);
+      tankGaugeEl.querySelector('#cylSurfaceSolid').setAttribute('cy', cylLevel);
+      tankGaugeEl.querySelector('#cylSurfaceSolid').setAttribute('opacity', level === 0 ? 0 : 1);
+      tankGaugeEl.querySelector('#cylBaseCap').setAttribute('fill', level === 0 ? 'url(#hatchWaterCyl)' : 'url(#cylWaterWall)');
+      tankGaugeEl.querySelector('#cylFillSolid').setAttribute('d', cylBandFlatBottom(110, CYL_RX, CYL_RY, cylLevel, CYL_BOTTOM));
+
+      const fillUncertain = tankGaugeEl.querySelector('#cylFillUncertain');
+      const surfaceUncertain = tankGaugeEl.querySelector('#cylSurfaceUncertain');
+      if (level === 100) {
+        fillUncertain.setAttribute('d', '');
+        surfaceUncertain.setAttribute('opacity', 0);
+      } else {
+        const uncertainTop = cylYFor(next) + CYL_SURFACE_NUDGE;
+        fillUncertain.setAttribute('d', cylBandArcBottom(110, CYL_RX, CYL_RY, uncertainTop, cylLevel));
+        surfaceUncertain.setAttribute('cy', uncertainTop);
+        surfaceUncertain.setAttribute('opacity', 1);
+      }
+    }
+
+    // tankGaugeEl must exist before showView() can move it into place.
+    initTankCylinder();
+    showView(location.hash.slice(1) || 'essentials');
+
     // Seed the local cache from the server before the first render, so a
     // fresh browser/device (or one whose localStorage got cleared) picks up
     // previously saved visibility instead of defaulting to "show all".
@@ -405,6 +830,7 @@
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({ calibration: cal }),
         });
+        if (lastSensors) renderSensors(lastSensors); // refreshes cylinder labels + L/% readout without waiting for the next sensor delta
         statusEl.textContent = `saved at ${new Date().toLocaleTimeString()}`;
       } catch (err) {
         statusEl.textContent = `save failed: ${err.message}`;
@@ -486,8 +912,13 @@
     function makeCircuitButton(label, on, onClick) {
       const btn = document.createElement('button');
       btn.className = on ? 'circuit on' : 'circuit';
-      btn.textContent = `${label}: ${on ? 'ON' : 'OFF'}`;
       btn.onclick = onClick;
+      const labelSpan = document.createElement('span');
+      labelSpan.textContent = label;
+      const led = document.createElement('span');
+      led.className = 'circuit-led';
+      btn.appendChild(labelSpan);
+      btn.appendChild(led);
       return btn;
     }
 
@@ -528,27 +959,39 @@
       for (const [name, sw] of Object.entries(status.electrical.switches)) {
         if (!isVisible(name)) continue;
         const on = sw.state;
-        const btn = document.createElement('button');
-        btn.className = on ? 'circuit on' : 'circuit';
-        btn.textContent = `${name}: ${on ? 'ON' : 'OFF'}`;
-        btn.onclick = () => setCircuit(name, !on);
-        container.appendChild(btn);
+        container.appendChild(makeCircuitButton(name, on, () => setCircuit(name, !on)));
       }
+      syncActiveSwipeHeight(); // circuit visibility/count can change the active pane's height
     }
 
-    // -- sensors sidebar: subscribes over the same WebSocket as switches now
-    // (gateway/runtime.py SENSOR_POLL_PERIOD dropped 5s -> 1s, so unlike
-    // before there's a real latency win here too), REST for the initial/
-    // reconnect snapshot. tanks.*.currentLevel arrives as a 0-1 ratio
-    // (signalk_alignment_plan.md §4/§7) -- liters is a client-side lookup
-    // against the same per-level calibration table the Sensor calibration
-    // form already edits, not something the server computes anymore.
+    // -- sensors sidebar: subscribes over the same WebSocket as switches,
+    // REST for the initial/reconnect snapshot. tanks.*.currentLevel arrives
+    // as a 0-1 ratio (signalk_alignment_plan.md §4/§7) -- liters is a
+    // client-side lookup against the same per-level calibration table the
+    // Sensor calibration form already edits, not something the server
+    // computes.
     let lastSensors = null;
 
     function tankLiters(tank, currentLevel) {
       const level = Math.round(currentLevel * 100); // exact: 0/25/50/75/100, no rounding error
       const raw = document.getElementById(`cal-${tank}-${level}`).value;
       return raw === '' ? null : parseFloat(raw);
+    }
+
+    // The sender only reports the floor of a range (DESIGN_NOTES.md), so a
+    // reading is honestly "at least <low>", not exactly <low> -- e.g. a 50%
+    // reading with 50->75L and 75->110L calibrated means "75-110 L", not a
+    // flat "75 L". 100% has no uncertainty above it. Falls back to a flat
+    // liters figure if the next threshold isn't calibrated yet, or to % if
+    // the current threshold itself isn't calibrated.
+    function tankRangeText(tank, currentLevel) {
+      const level = Math.round(currentLevel * 100);
+      const low = tankLiters(tank, currentLevel);
+      if (low === null) return `${level}%`;
+      if (level === 100) return `${low} L`;
+      const next = TANK_LEVELS[TANK_LEVELS.indexOf(level) + 1];
+      const highRaw = document.getElementById(`cal-${tank}-${next}`).value;
+      return highRaw === '' ? `${low} L` : `${low}–${parseFloat(highRaw)} L`;
     }
 
     // -- tank settings: sound-on-level-change toggle + live gauges (markup above) --
@@ -609,28 +1052,40 @@
       playTankChangeSound(); // plays either way -- lets you confirm it's audible, and the tap unlocks autoplay for later
     }
 
+    // Every page with a tank gauge also has its own freshwater/blackwater
+    // text+bar elements under this id prefix (cheap plain divs, unlike the
+    // <svg> above -- no benefit to sharing those across pages too).
+    const TANK_TEXT_ID_PREFIXES = ['sb-', 'es-', 'sn-', 'tv-'];
+
+    function updateTankTextPanel(idPrefix, freshRangeText, blackLevel, blackLiters) {
+      document.getElementById(`${idPrefix}value-fresh`).textContent = freshRangeText;
+      document.getElementById(`${idPrefix}gauge-black`).style.width = `${blackLevel * 100}%`;
+      document.getElementById(`${idPrefix}value-black`).textContent =
+        blackLiters !== null ? `${blackLiters} L` : `${Math.round(blackLevel * 100)}%`;
+    }
+
+    function updateBatteryRow(idPrefix, starterVoltage, houseVoltage) {
+      document.getElementById(`${idPrefix}value-starter`).textContent = `${starterVoltage.toFixed(2)} V`;
+      document.getElementById(`${idPrefix}value-house`).textContent = `${houseVoltage.toFixed(2)} V`;
+    }
+
     function renderSensors(data) {
       const freshLevel = data.tanks.freshWater.currentLevel;
       const blackLevel = data.tanks.blackWater.currentLevel;
-      const freshLiters = tankLiters('freshwater', freshLevel);
+      const freshPct = Math.round(freshLevel * 100);
+      const freshRangeText = tankRangeText('freshwater', freshLevel);
       const blackLiters = tankLiters('blackwater', blackLevel);
-      document.getElementById('gauge-fresh').style.width = `${freshLevel * 100}%`;
-      document.getElementById('value-fresh').textContent =
-        freshLiters !== null ? `${freshLiters} L` : `${Math.round(freshLevel * 100)}%`;
-      document.getElementById('gauge-black').style.width = `${blackLevel * 100}%`;
-      document.getElementById('value-black').textContent =
-        blackLiters !== null ? `${blackLiters} L` : `${Math.round(blackLevel * 100)}%`;
-      document.getElementById('tv-gauge-fresh').style.width = `${freshLevel * 100}%`;
-      document.getElementById('tv-value-fresh').textContent =
-        freshLiters !== null ? `${freshLiters} L` : `${Math.round(freshLevel * 100)}%`;
-      document.getElementById('tv-gauge-black').style.width = `${blackLevel * 100}%`;
-      document.getElementById('tv-value-black').textContent =
-        blackLiters !== null ? `${blackLiters} L` : `${Math.round(blackLevel * 100)}%`;
+      setTankCylinderLevel(freshPct);
+      updateTankCylinderLabels('freshwater');
+      for (const idPrefix of TANK_TEXT_ID_PREFIXES) {
+        updateTankTextPanel(idPrefix, freshRangeText, blackLevel, blackLiters);
+      }
 
       const starterVoltage = data.electrical.batteries.starter.voltage;
       const houseVoltage = data.electrical.batteries.house.voltage;
-      document.getElementById('value-starter').textContent = `${starterVoltage.toFixed(2)} V`;
-      document.getElementById('value-house').textContent = `${houseVoltage.toFixed(2)} V`;
+      updateBatteryRow('sb-', starterVoltage, houseVoltage);
+      updateBatteryRow('es-', starterVoltage, houseVoltage);
+      updateBatteryRow('sn-', starterVoltage, houseVoltage);
       // Sensor calibration page shows the same live voltage as reference
       // while you're about to type in a multimeter reading next to it.
       document.getElementById('cal-starter-voltage').textContent = `${starterVoltage.toFixed(2)} V`;
