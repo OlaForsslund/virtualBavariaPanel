@@ -3,9 +3,11 @@
 A gateway that lets a Raspberry Pi act as a second control panel on
 Bavaria yachts with CAN bus pannel. Specifically tested on the
 [12V control panel with USB charger](https://www.svb24.com/en/bavaria-control-panel-12-v-incl-usb-cigarette-lighter-socket.html)
-fitted as standard on many modern Bavaria yacts, including Bavaria Cruiser 34, 37, 41, 46, 51, 56. Tested on a Bavaria Cruiser 34 from 2022. It takes over control of the relay board so a web app can control the relays, such as turning on/off lanterns, while still being able to controll them via the existing
-physical panel. Unfortunatly, the pysical pannel will not indicate updated status. Turning the gateway off hands control back to the
-panel alone. See `architecture.md` for the full design.
+fitted as standard on many modern Bavaria yacts, including Bavaria Cruiser 34, 37, 41, 46, 51, 56. Tested on a Bavaria Cruiser 34 from 2022.
+
+It takes over control of the relay board to let a web app control the relays, such as turning on/off navigation lights, while still being able to 
+controll them via the existing physical panel. Unfortunatly, the pysical pannel will not indicate updated relay status. Turning the gateway off 
+hands control back to the panel alone. See `architecture.md` for the full design.
 
 ## What you need
 
@@ -13,7 +15,7 @@ panel alone. See `architecture.md` for the full design.
   bus — see `pinout.md` for the connector.
 - A web-browser, such as a phone, 
 and/or
-- A Multi Functional Display (MFD), such as the a chartplotter. For B&G you an ethernet cable connected to the plotter, see Navico specifics below.
+- A Multi Functional Display (MFD), such as a chartplotter. For B&G plotters you an ethernet cable connected to the plotter, see Navico specifics below.
 
 ## Documentation map
 
@@ -31,9 +33,9 @@ and/or
 
 
 To run it simulated for development (after `./setup_venv.sh`), run
-`./run_simulated.sh` — one command instead of three terminals. See
-`dev-environment.md` for what it's running and the manual per-terminal
-version if you want to drive each piece separately.
+`./run_simulated.sh`. This bring up a command line simulating the physical pannel,
+as well as the gateway with webapp served at localhost:8000
+See `dev-environment.md` for what it's running or how to run each process separately.
 
 To try it against your own real bus without the full deployment below,
 run `./run_hardware.sh` (after `./setup_venv.sh`) — it brings up `can0`
