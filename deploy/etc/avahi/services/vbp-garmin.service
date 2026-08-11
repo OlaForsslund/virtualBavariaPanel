@@ -1,0 +1,11 @@
+<?xml version="1.0" standalone='no'?>
+<!DOCTYPE service-group SYSTEM "avahi-service.dtd">
+<service-group>
+  <name>Bavaria Panel</name>
+  <service>
+    <type>_garmin-mrn-html._tcp</type>
+    <port>80</port>
+    <txt-record>protovers=1</txt-record>
+    <txt-record>path=/garmin/config.json</txt-record>
+  </service>
+</service-group>

@@ -1,0 +1,11 @@
+<?xml version="1.0" standalone='no'?>
+<!DOCTYPE service-group SYSTEM "avahi-service.dtd">
+<service-group>
+  <name>Bavaria Panel</name>
+  <service>
+    <type>_http._tcp</type>
+    <txt-record>UrlPath=/</txt-record>
+    <txt-record>generic=true</txt-record>
+    <txt-record>serial=vbp</txt-record>
+  </service>
+</service-group>
