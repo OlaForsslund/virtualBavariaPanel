@@ -197,13 +197,13 @@
     #swipe-viewport { overflow: hidden; position: relative; padding: 0; }
     #swipe-track {
       display: flex;
-      width: 400%; /* SWIPE_VIEWS.length panes -- keep in sync if that array's length changes */
+      width: calc(100% * var(--swipe-pages, 4));
       transition: transform 260ms ease;
     }
     #swipe-track.no-anim { transition: none; }
     #swipe-track > .pane {
-      flex: 0 0 25%;
-      width: 25%;
+      flex: 0 0 calc(100% / var(--swipe-pages, 4));
+      width: calc(100% / var(--swipe-pages, 4));
       box-sizing: border-box;
       padding: 16px;
     }
@@ -327,6 +327,26 @@
       border-top: 1px solid var(--border);
     }
     .battery-row span:first-child { text-transform: uppercase; letter-spacing: 0.03em; color: var(--text-secondary); }
+    /* Power flow diagram */
+    #power-solar {
+      width: 100%;
+      max-width: 420px;
+    }
+    #power-diagram {
+      width: 100%;
+      max-width: 400px;
+      height: 300px;
+      background: rgba(255, 17, 0, 0.05);
+      border-radius: 8px;
+      margin-bottom: 20px;
+      display: block;
+    }
+    .power-label { font-size: 0.85em; font-weight: bold; text-anchor: middle; }
+    .power-value { font-size: 0.75em; text-anchor: middle; }
+    .arrow-active { stroke: var(--brass); stroke-width: 3; }
+    .arrow-inactive { stroke: var(--text-secondary); stroke-width: 2; opacity: 0.3; }
+    @keyframes flow { 0% { stroke-dashoffset: 0; } 100% { stroke-dashoffset: -8px; } }
+    .arrow-flowing { animation: flow 0.8s linear infinite; stroke-dasharray: 4, 4; }
   </style>
 </head>
 <body>
@@ -396,6 +416,11 @@
         </div>
         <div class="battery-row"><span>Starter</span><span id="sn-value-starter">&mdash;</span></div>
         <div class="battery-row"><span>House</span><span id="sn-value-house">&mdash;</span></div>
+      </section>
+
+      <section id="view-power" class="pane">
+        <div id="power-solar">loading&hellip;</div>
+        <div id="power-battery">loading&hellip;</div>
       </section>
 
       <section id="view-config" class="pane">
@@ -498,13 +523,15 @@
     // (diagnostics, relays, sensor calibration, tank settings) aren't part
     // of that order -- they keep their own "<- Settings" button instead of
     // the header/swipe.
-    const SWIPE_VIEWS = ['essentials', 'control', 'sensors', 'config'];
-    const VIEW_LABELS = { essentials: 'Essentials', control: 'All Controls', sensors: 'Sensors', config: 'Settings' };
+    const SWIPE_VIEWS = ['essentials', 'control', 'sensors', 'power', 'config'];
+    const VIEW_LABELS = { essentials: 'Essentials', control: 'All Controls', sensors: 'Sensors', power: 'Power', config: 'Settings' };
     const swipeViewport = document.getElementById('swipe-viewport');
     const swipeTrack = document.getElementById('swipe-track');
     const navLabel = document.getElementById('nav-label');
     const navPrev = document.getElementById('nav-prev');
     const navNext = document.getElementById('nav-next');
+    // Set CSS variable for dynamic swipe track width calculation
+    document.documentElement.style.setProperty('--swipe-pages', SWIPE_VIEWS.length);
 
     // Sub-views all hang off Settings (only reachable via the Config page),
     // so the header/arrows treat them as "currently on Settings" for display
@@ -1270,6 +1297,83 @@
       document.getElementById('cal-house-voltage').textContent = `${houseVoltage.toFixed(2)} V`;
     }
 
+    let lastElectrical = null;
+
+    function renderPower(data) {
+      lastElectrical = data;
+      const elec = data.electrical;
+      console.log('renderPower called with data:', data);
+
+      // Solar charger: device '1' from Victron BLE config
+      const solar = elec.solar['1'];
+      const batt = elec.batteries['0'];
+      console.log('Solar data:', solar);
+      console.log('Battery data:', batt);
+
+      // Infer land charger power: battery current - solar current
+      // If positive, land charger is supplying power
+      const solarCurrent = (solar && solar.current && solar.current.value) || 0;
+      const battCurrent = (batt && batt.current && batt.current.value) || 0;
+      const landChargerCurrent = battCurrent - solarCurrent;
+      const landChargerPower = ((batt && batt.voltage && batt.voltage.value) || 12) * Math.max(0, landChargerCurrent);
+
+      // Generate power flow diagram
+      const diagram = `
+        <svg viewBox="0 0 400 300" id="power-diagram">
+          <!-- Solar panel (top left) -->
+          <rect x="20" y="20" width="60" height="50" fill="none" stroke="var(--brass)" stroke-width="2" rx="4"/>
+          <text x="50" y="35" class="power-label" fill="var(--text-primary)">SOLAR</text>
+          <text x="50" y="63" class="power-value" fill="var(--text-primary)">${((solar && solar.panelPower && solar.panelPower.value) || 0).toFixed(0)}W</text>
+
+          <!-- Land charger (top right) -->
+          <rect x="320" y="20" width="60" height="50" fill="none" stroke="${landChargerCurrent > 0 ? 'var(--brass)' : 'var(--text-secondary)'}" stroke-width="2" rx="4"/>
+          <text x="350" y="35" class="power-label" fill="var(--text-primary)">CHARGER</text>
+          <text x="350" y="63" class="power-value" fill="var(--text-primary)">${Math.max(0, landChargerPower).toFixed(0)}W</text>
+
+          <!-- Battery (center) -->
+          <circle cx="200" cy="150" r="40" fill="none" stroke="var(--brass)" stroke-width="3"/>
+          <text x="200" y="145" class="power-label" fill="var(--text-primary)">BATTERY</text>
+          <text x="200" y="160" class="power-value" fill="var(--text-primary)">${(((batt && batt.capacity && batt.capacity.stateOfCharge && batt.capacity.stateOfCharge.value) || 0) * 100).toFixed(0)}%</text>
+
+          <!-- Load (bottom) -->
+          <rect x="320" y="220" width="60" height="50" fill="none" stroke="var(--brass)" stroke-width="2" rx="4"/>
+          <text x="350" y="235" class="power-label" fill="var(--text-primary)">LOAD</text>
+          <text x="350" y="263" class="power-value" fill="var(--text-primary)">${Math.abs((batt && batt.power && batt.power.value) || 0).toFixed(0)}W</text>
+
+          <!-- Arrow: Solar → Battery -->
+          <path d="M 80 45 Q 140 100 160 110" class="arrow-${solarCurrent > 0.5 ? 'active arrow-flowing' : 'inactive'}" fill="none" marker-end="url(#arrowhead)"/>
+          <text x="110" y="70" class="power-value" fill="var(--text-primary)">${solarCurrent.toFixed(1)}A</text>
+
+          <!-- Arrow: Charger → Battery -->
+          <path d="M 320 45 Q 260 100 240 110" class="arrow-${landChargerCurrent > 0.5 ? 'active arrow-flowing' : 'inactive'}" fill="none" marker-end="url(#arrowhead)"/>
+          ${landChargerCurrent > 0.5 ? `<text x="290" y="70" class="power-value" fill="var(--text-primary)">${landChargerCurrent.toFixed(1)}A</text>` : ''}
+
+          <!-- Arrow: Battery → Load -->
+          <path d="M 240 185 Q 280 200 310 235" class="arrow-active arrow-flowing" fill="none" marker-end="url(#arrowhead)"/>
+          <text x="270" y="210" class="power-value" fill="var(--text-primary)">${Math.abs(battCurrent).toFixed(1)}A</text>
+
+          <defs>
+            <marker id="arrowhead" markerWidth="10" markerHeight="10" refX="9" refY="3" orient="auto">
+              <polygon points="0 0, 10 3, 0 6" fill="var(--brass)"/>
+            </marker>
+          </defs>
+        </svg>
+      `;
+      const detailedHtml = diagram + (solar ? `
+        <h4 style="margin-top: 20px; color: var(--text-primary);">Solar Details</h4>
+        <div class="battery-row"><span>Mode</span><span style="color:var(--text-primary)">${(solar.chargingMode && solar.chargingMode.value) || '&mdash;'}</span></div>
+        <div class="battery-row"><span>Yield today</span><span style="color:var(--text-primary)">${(((solar.yieldToday && solar.yieldToday.value) || 0) / 3.6e6).toFixed(1)} kWh</span></div>
+        ${landChargerCurrent > 0.5 ? `<h4 style="margin-top: 20px; color: var(--text-primary);">Land Charger</h4><div class="battery-row"><span>Current</span><span style="color:var(--text-primary)">${landChargerCurrent.toFixed(2)} A</span></div>` : ''}
+        <h4 style="margin-top: 20px; color: var(--text-primary);">Battery Details</h4>
+        <div class="battery-row"><span>Voltage</span><span style="color:var(--text-primary)">${((batt && batt.voltage && batt.voltage.value) || 0).toFixed(2)} V</span></div>
+        <div class="battery-row"><span>Current (net)</span><span style="color:var(--text-primary)">${(battCurrent).toFixed(2)} A</span></div>
+        <div class="battery-row"><span>Power</span><span style="color:var(--text-primary)">${((batt && batt.power && batt.power.value) || 0).toFixed(1)} W</span></div>
+        <div class="battery-row"><span>Time remaining</span><span style="color:var(--text-primary)">${((((batt && batt.capacity && batt.capacity.timeRemaining && batt.capacity.timeRemaining.value) || 0) / 3600).toFixed(1))} h</span></div>
+      ` : 'No solar charger data available');
+      document.getElementById('power-solar').innerHTML = detailedHtml;
+      document.getElementById('power-battery').innerHTML = '';
+    }
+
     async function fetchSensorsSnapshot() {
       try {
         const resp = await fetch('/sensors');
@@ -1279,6 +1383,21 @@
         }
       } catch (err) {
         // sidebar just keeps showing the last good reading
+      }
+    }
+
+    async function fetchElectricalSnapshot() {
+      try {
+        // Signal K runs on port 3000; fetch directly (works from PC, falls back to WebSocket deltas from MFD)
+        const url = `http://${location.hostname}:3000/signalk/v1/api/vessels/self/electrical`;
+        const resp = await fetch(url);
+        if (resp.ok) {
+          const elec = await resp.json();
+          renderPower({ electrical: elec });
+        }
+        // 401 is fine — WebSocket deltas will populate it once they arrive
+      } catch (err) {
+        // Power page just shows loading if fetch fails; WebSocket deltas will eventually populate it
       }
     }
 
@@ -1297,12 +1416,13 @@
       }
     }
 
-    // Applies electrical.switches.*, electrical.batteries.*, and tanks.*
-    // deltas onto lastStatus/lastSensors in place, re-rendering whichever
-    // was actually touched by this message.
+    // Applies electrical.switches.*, electrical.batteries.*, electrical.solar.*
+    // and tanks.* deltas onto lastStatus/lastSensors/lastElectrical in place,
+    // re-rendering whichever was actually touched by this message.
     function applyDelta(updates) {
       let statusChanged = false;
       let sensorsChanged = false;
+      let electricalChanged = false;
       for (const update of updates) {
         for (const { path, value } of update.values) {
           const sw = path.match(/^electrical\.switches\.(.+)\.state$/);
@@ -1317,6 +1437,24 @@
             sensorsChanged = true;
             continue;
           }
+          // Handle electrical.solar.* and other electrical.batteries.* updates for Power page
+          if ((path.match(/^electrical\.solar\./) || path.match(/^electrical\.batteries\./)) && lastElectrical) {
+            // Deep-set the value at path in lastElectrical.
+            // e.g. "electrical.solar.1.voltage.value" -> lastElectrical.solar['1'].voltage.value = value
+            const parts = path.split('.');
+            let obj = lastElectrical;
+            // Navigate to parent (skip 'electrical' prefix)
+            for (let i = 1; i < parts.length - 2; i++) {
+              if (!obj[parts[i]]) obj[parts[i]] = {};
+              obj = obj[parts[i]];
+            }
+            // Create/update the second-to-last level with .value
+            const fieldName = parts[parts.length - 2];
+            if (!obj[fieldName]) obj[fieldName] = {};
+            obj[fieldName].value = value;
+            electricalChanged = true;
+            continue;
+          }
           const tank = path.match(/^tanks\.(freshWater|blackWater)\.currentLevel$/);
           if (tank && lastSensors) {
             lastSensors.tanks[tank[1]].currentLevel = value;
@@ -1329,6 +1467,7 @@
       }
       if (statusChanged) renderControl(lastStatus);
       if (sensorsChanged) renderSensors(lastSensors);
+      if (electricalChanged) renderPower(lastElectrical);
     }
 
     const RECONNECT_MS = 1000;
@@ -1342,12 +1481,14 @@
           subscribe: [
             { path: 'electrical.switches.*' },
             { path: 'electrical.batteries.*' },
+            { path: 'electrical.solar.*' },
             { path: 'tanks.*' },
           ],
         }));
         // reconnect or first connect -- deltas alone can't recover a missed gap
         fetchStatusSnapshot();
         fetchSensorsSnapshot();
+        fetchElectricalSnapshot();
       };
       ws.onmessage = (msg) => {
         const delta = JSON.parse(msg.data);

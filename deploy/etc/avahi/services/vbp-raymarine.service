@@ -4,6 +4,7 @@
   <name>Bavaria Panel</name>
   <service>
     <type>_http._tcp</type>
+    <port>80</port>
     <txt-record>UrlPath=/</txt-record>
     <txt-record>generic=true</txt-record>
     <txt-record>serial=vbp</txt-record>

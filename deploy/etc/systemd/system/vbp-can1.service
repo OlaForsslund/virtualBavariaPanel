@@ -1,0 +1,13 @@
+[Unit]
+Description=Bring up can1 for the boat's NMEA 2000 backbone (Signal K)
+Before=signalk.service
+
+[Service]
+Type=oneshot
+RemainAfterExit=yes
+ExecStartPre=-/usr/sbin/ip link set can1 down
+ExecStart=/usr/sbin/ip link set can1 up type can bitrate 250000 restart-ms 1000 berr-reporting on fd off
+ExecStop=/usr/sbin/ip link set can1 down
+
+[Install]
+WantedBy=multi-user.target
