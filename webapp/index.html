@@ -6,6 +6,49 @@
       .then(() => console.log('Service Worker registered'))
       .catch(err => console.error('Service Worker failed', err));
   }
+
+  // -- day/night theme: resolved and applied here, before <head>/CSS even
+  // parse, so there's no flash of the wrong theme. Three sources, in
+  // priority order:
+  //  1. Manual override, set via the Settings theme button (cycleTheme(),
+  //     further down) and persisted in localStorage -- works standalone,
+  //     e.g. on a phone with neither of the sources below.
+  //  2. The MFD's own `mode` URL param (confirmed via referer logging,
+  //     CLAUDE.md 2026-08-06 -- "not currently read by webapp/index.html
+  //     but available if the app ever wants to adapt"). Only present when
+  //     opened from the MFD.
+  //  3. The browser/OS's prefers-color-scheme, for phones/tablets that
+  //     have neither of the above -- lets a phone in its normal light mode
+  //     default to day without anyone having to find the Settings toggle
+  //     first. Unsupported on the MFD's own Chrome 69 (added in Chrome 76),
+  //     but that's moot since case 2 already resolves it there.
+  // Falls back to night -- the original/only theme -- if nothing matches,
+  // since that's the safer default for after-dark helm use.
+  const THEME_KEY = 'vbp.theme';
+  function loadThemeOverride() {
+    try {
+      const raw = localStorage.getItem(THEME_KEY);
+      return (raw === 'day' || raw === 'night') ? raw : null;
+    } catch (err) {
+      return null; // localStorage unavailable -- no override, falls through below
+    }
+  }
+  function mfdModeParam() {
+    const mode = new URLSearchParams(location.search).get('mode');
+    return (mode === 'day' || mode === 'night') ? mode : null;
+  }
+  function systemPrefersLight() {
+    return typeof window.matchMedia === 'function'
+      && window.matchMedia('(prefers-color-scheme: light)').matches
+      ? 'day' : null;
+  }
+  function resolvedTheme() {
+    return loadThemeOverride() || mfdModeParam() || systemPrefersLight() || 'night';
+  }
+  function applyTheme() {
+    document.documentElement.dataset.theme = resolvedTheme();
+  }
+  applyTheme();
 </script>
 <head>
   <link rel="manifest" href="/manifest.json">
@@ -26,13 +69,28 @@
       src: url('/font/DejaVuSans-Bold.ttf') format('truetype');
       font-weight: bold;
     }
-    /* Theme : deep navy background, brass-panel tiles, brass for live/active state. */
+    /* Theme: night (default/fallback) is the original deep navy background,
+       brass-panel tiles, brass for live/active state -- easiest on the eyes
+       for after-dark helm use. day is for full sunlight -- same dark
+       background (the B&G MFD's own chrome is black, so a light page would
+       clash/glare next to it), but brighter buttons, borders and text so
+       the panel doesn't wash out; headers go bold instead of brighter still,
+       since bold reads fine at a dimmer brightness. Switched automatically
+       via the MFD's own mode=day/night URL param (webapp/index.html's
+       applyTheme(), CLAUDE.md 2026-08-06) or manually via the Settings
+       theme button.
+       --text-primary in night mode is red (#FF1100), not white -- matches
+       the MFD's own night chrome (sampled directly from
+       webapp/dev/screenshots/incoming/Screenshot_2026-08-13_12.31.48.png:
+       its bold readouts/headings use this exact red). Preserves night
+       vision -- less pretty than white, more practical, per the MFD's own
+       convention. */
     :root {
       --bg: #061826;
       --surface: #0E2B40;
       --surface-hover: #123249;
       --border: rgba(201,154,75,0.25);
-      --text-primary: #E9EDE7;
+      --text-primary: #FF1100;
       --text-secondary: #7C93A3;
       --water-deep: #175577;
       --water-light: #3FA9D6;
@@ -40,6 +98,27 @@
       --brass-dim: #8C6B34;
       --accent: var(--brass);
       --accent-text: #1a1206;
+      --btn-sheen-1: rgba(255,255,255,0.06);
+      --btn-sheen-2: rgba(255,255,255,0.01);
+      --btn-inset-highlight: rgba(255,255,255,0.05);
+      --circuit-border: rgba(201,154,75,0.35);
+      --heading-weight: normal;
+    }
+    :root[data-theme="day"] {
+      --surface: #163A54;
+      --surface-hover: #1D4A69;
+      --border: rgba(255,201,77,0.4);
+      --text-primary: #FFFFFF;
+      --text-secondary: #B9C9D6;
+      --brass: #FFC94D;
+      --brass-dim: #E0A83E;
+      --accent: var(--brass);
+      --accent-text: #1a1206;
+      --btn-sheen-1: rgba(255,255,255,0.16);
+      --btn-sheen-2: rgba(255,255,255,0.05);
+      --btn-inset-highlight: rgba(255,255,255,0.14);
+      --circuit-border: rgba(255,201,77,0.55);
+      --heading-weight: bold;
     }
     /* Belt-and-braces: the narrowest MFD split (autopilot expanded, quarter
        pane, ~318px -- mfd_display_notes-zeus3-7.md) leaves very little room
@@ -143,12 +222,12 @@
       letter-spacing: 0.02em;
       padding: 10px 16px;
       margin: 6px 0;
-      border: 1px solid rgba(201,154,75,0.35);
+      border: 1px solid var(--circuit-border);
       border-radius: 8px;
       cursor: pointer;
-      background: linear-gradient(180deg, rgba(255,255,255,0.06), rgba(255,255,255,0.01));
+      background: linear-gradient(180deg, var(--btn-sheen-1), var(--btn-sheen-2));
       color: var(--text-primary);
-      box-shadow: 0 1px 0 rgba(255,255,255,0.05) inset;
+      box-shadow: 0 1px 0 var(--btn-inset-highlight) inset;
       transition: background 0.1s, box-shadow 0.1s, border-color 0.1s;
     }
     button.circuit.on {
@@ -223,7 +302,7 @@
       text-transform: uppercase;
       letter-spacing: 0.04em;
       color: var(--brass);
-      font-weight: normal;
+      font-weight: var(--heading-weight);
     }
     .sensors-panel h3 {
       margin: 0 0 12px;
@@ -327,6 +406,7 @@
         <p><button class="action-btn" onclick="location.hash='relays'">Circuit visibility</button></p>
         <p><button class="action-btn" onclick="location.hash='sensor-calibration'">Sensor calibration</button></p>
         <p><button class="action-btn" onclick="location.hash='tank-settings'">Tank settings</button></p>
+        <p><button class="action-btn" id="theme-btn" onclick="cycleTheme()"></button></p>
       </section>
     </div>
   </div>
@@ -614,6 +694,31 @@
       alert('Restart requested — back online in about a minute.');
     }
 
+    // -- theme button label + manual cycling. Resolution/application
+    // (applyTheme(), loadThemeOverride(), mfdModeParam(), THEME_KEY) lives
+    // in the inline <script> at the top of the document so it runs before
+    // first paint; this just keeps the Settings button's label in sync and
+    // handles clicks. Cycle: auto -> day -> night -> auto.
+    function updateThemeButton() {
+      const btn = document.getElementById('theme-btn');
+      const override = loadThemeOverride();
+      btn.textContent = override
+        ? `Theme: ${override === 'day' ? 'Day' : 'Night'} (manual)`
+        : `Theme: Auto (${resolvedTheme() === 'day' ? 'day' : 'night'})`;
+    }
+    function cycleTheme() {
+      const current = loadThemeOverride();
+      const next = current === null ? 'day' : current === 'day' ? 'night' : null;
+      try {
+        if (next === null) localStorage.removeItem(THEME_KEY); else localStorage.setItem(THEME_KEY, next);
+      } catch (err) {
+        // can't persist -- override stays cleared, button will keep offering "day" next click
+      }
+      applyTheme();
+      updateThemeButton();
+    }
+    updateThemeButton();
+
     // -- config: which circuits are visible on Control, persisted server-side
     // (GET/PUT /config) with localStorage as an instant local cache so
     // rendering never has to wait on a round trip.
@@ -671,7 +776,12 @@
     // vertical scroll -- CYL_BOTTOM stays anchored so the base cap doesn't
     // move, only the top (and therefore the viewBox, below) shrinks.
     const CYL_TOP = 144, CYL_BOTTOM = 404, CYL_HEIGHT = CYL_BOTTOM - CYL_TOP, CYL_RX = 58, CYL_RY = 14;
-    const CYL_SURFACE_NUDGE = 14; // px, cosmetic: keeps the uncertain-range surface off the threshold ring/label
+    // px: keeps the uncertain-range surface off the next threshold's ring/label --
+    // for interior thresholds that's a thin dashed ring, but the 100% "threshold"
+    // is the rim cap itself (ry=16, drawn opaque on top), so this must clear that
+    // or the fill's top edge disappears under the rim and the stripes read as
+    // reaching all the way to 100% (bug: nudge of 14 was short of the rim's 16).
+    const CYL_SURFACE_NUDGE = 20;
     const cylYFor = (pct) => CYL_BOTTOM - (pct / 100) * CYL_HEIGHT;
     // Margin above the rim / below the base cap, in viewBox units.
     const CYL_VIEWBOX_MARGIN = 14;
@@ -681,9 +791,9 @@
     function tankCylinderSVG() {
       return `<svg viewBox="-28 ${CYL_VIEWBOX_TOP} 248 ${CYL_VIEWBOX_HEIGHT}" xmlns="http://www.w3.org/2000/svg">
         <defs>
-          <pattern id="hatchWaterCyl" width="8" height="8" patternTransform="rotate(45)" patternUnits="userSpaceOnUse">
-            <rect width="8" height="8" fill="var(--water-deep)"/>
-            <line x1="0" y1="0" x2="0" y2="8" stroke="var(--water-light)" stroke-width="3" opacity="0.55"/>
+          <pattern id="hatchWaterCyl" width="10" height="10" patternTransform="rotate(45)" patternUnits="userSpaceOnUse">
+            <rect width="10" height="10" fill="var(--water-deep)"/>
+            <line x1="0" y1="0" x2="0" y2="10" stroke="var(--water-light)" stroke-width="5" opacity="0.7"/>
           </pattern>
           <linearGradient id="cylWall" x1="0" y1="0" x2="1" y2="0">
             <stop offset="0%" stop-color="#08202f"/>

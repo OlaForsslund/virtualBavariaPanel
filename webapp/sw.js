@@ -1,6 +1,8 @@
+const CACHE_NAME = 'v2';
+
 self.addEventListener('install', event => {
   event.waitUntil(
-    caches.open('v1').then(cache => {
+    caches.open(CACHE_NAME).then(cache => {
       return cache.addAll([
         '/',
         '/index.html',
@@ -9,7 +11,17 @@ self.addEventListener('install', event => {
         '/icon-192.png',
         '/icon-512.png'
       ]);
-    })
+    }).then(() => self.skipWaiting())
+  );
+});
+
+self.addEventListener('activate', event => {
+  event.waitUntil(
+    caches.keys().then(names => {
+      return Promise.all(
+        names.filter(name => name !== CACHE_NAME).map(name => caches.delete(name))
+      );
+    }).then(() => self.clients.claim())
   );
 });
 
