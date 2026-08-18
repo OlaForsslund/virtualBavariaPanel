@@ -13,17 +13,12 @@
   //  1. Manual override, set via the Settings theme button (cycleTheme(),
   //     further down) and persisted in localStorage -- works standalone,
   //     e.g. on a phone with neither of the sources below.
-  //  2. The MFD's own `mode` URL param (confirmed via referer logging,
-  //     CLAUDE.md 2026-08-06 -- "not currently read by webapp/index.html
-  //     but available if the app ever wants to adapt"). Only present when
-  //     opened from the MFD.
+  //  2. The MFD's own `mode` at at least present on B&G
   //  3. The browser/OS's prefers-color-scheme, for phones/tablets that
   //     have neither of the above -- lets a phone in its normal light mode
   //     default to day without anyone having to find the Settings toggle
-  //     first. Unsupported on the MFD's own Chrome 69 (added in Chrome 76),
-  //     but that's moot since case 2 already resolves it there.
-  // Falls back to night -- the original/only theme -- if nothing matches,
-  // since that's the safer default for after-dark helm use.
+  //     first.
+  // Falls back to night
   const THEME_KEY = 'vbp.theme';
   function loadThemeOverride() {
     try {
@@ -45,6 +40,7 @@
   function resolvedTheme() {
     return loadThemeOverride() || mfdModeParam() || systemPrefersLight() || 'night';
   }
+
   function applyTheme() {
     document.documentElement.dataset.theme = resolvedTheme();
   }
@@ -432,6 +428,18 @@
         <p><button class="action-btn" onclick="location.hash='sensor-calibration'">Sensor calibration</button></p>
         <p><button class="action-btn" onclick="location.hash='tank-settings'">Tank settings</button></p>
         <p><button class="action-btn" id="theme-btn" onclick="cycleTheme()"></button></p>
+        <p>
+          <label><input type="checkbox" id="signalk-url-enabled" onchange="onSignalkUrlEnabledChange()"> Show Power page (needs a Signal K source for solar/shunt data)</label><br>
+          <input type="text" id="signalk-url-input" placeholder="localhost" style="width: 100%; box-sizing: border-box;" disabled>
+          <button class="action-btn" onclick="saveSignalkUrl()">Save</button>
+          <button class="action-btn" onclick="testSignalkUrl()">Test connection</button>
+        </p>
+        <p style="color: var(--text-secondary); font-size: 0.9em;">
+          "localhost" if Signal K runs on this same box; try "venus.local" for a
+          Venus OS GX device on the network. No need to type "http://" or a port
+          &mdash; port 3000 is assumed.
+        </p>
+        <p id="signalk-url-status"></p>
       </section>
     </div>
   </div>
@@ -523,15 +531,66 @@
     // (diagnostics, relays, sensor calibration, tank settings) aren't part
     // of that order -- they keep their own "<- Settings" button instead of
     // the header/swipe.
-    const SWIPE_VIEWS = ['essentials', 'control', 'sensors', 'power', 'config'];
+    // Power only has anything to show once a Signal K source is configured
+    // (electrical.solar/.batteries come from there, not the gateway's own
+    // CAN data) -- so it's excluded from the carousel entirely rather than
+    // just shown blank/loading, whenever that hasn't been set up. Read here,
+    // ahead of the rest of the Signal K URL config UI further down (which
+    // needs the DOM parsed first), since the initial SWIPE_VIEWS/track
+    // layout below depends on it.
+    const SIGNALK_URL_KEY = 'vbp.signalkUrl';
+    function loadCachedSignalkUrl() {
+      try {
+        return localStorage.getItem(SIGNALK_URL_KEY) || '';
+      } catch (err) {
+        return ''; // localStorage unavailable -- treated as "not configured"
+      }
+    }
+    let signalkEnabled = !!loadCachedSignalkUrl();
+
+    const ALL_SWIPE_VIEWS = ['essentials', 'control', 'sensors', 'power', 'config'];
     const VIEW_LABELS = { essentials: 'Essentials', control: 'All Controls', sensors: 'Sensors', power: 'Power', config: 'Settings' };
     const swipeViewport = document.getElementById('swipe-viewport');
     const swipeTrack = document.getElementById('swipe-track');
+    const powerPane = document.getElementById('view-power');
+    const configPane = document.getElementById('view-config');
     const navLabel = document.getElementById('nav-label');
     const navPrev = document.getElementById('nav-prev');
     const navNext = document.getElementById('nav-next');
-    // Set CSS variable for dynamic swipe track width calculation
-    document.documentElement.style.setProperty('--swipe-pages', SWIPE_VIEWS.length);
+
+    function computeSwipeViews() {
+      return ALL_SWIPE_VIEWS.filter(v => v !== 'power' || signalkEnabled);
+    }
+    // Keeps swipeTrack's actual DOM children (which setSwipeIndex/
+    // currentPageRoot index into directly) and the --swipe-pages width var
+    // in lockstep with SWIPE_VIEWS -- must run every time signalkEnabled
+    // changes, never SWIPE_VIEWS alone.
+    function syncPowerPaneDOM() {
+      if (signalkEnabled && powerPane.parentElement !== swipeTrack) {
+        swipeTrack.insertBefore(powerPane, configPane);
+      } else if (!signalkEnabled && powerPane.parentElement === swipeTrack) {
+        powerPane.remove();
+      }
+      document.documentElement.style.setProperty('--swipe-pages', SWIPE_VIEWS.length);
+    }
+
+    let SWIPE_VIEWS = computeSwipeViews();
+    syncPowerPaneDOM();
+
+    // Called whenever signalkEnabled changes after the initial page load
+    // (checkbox toggle, Save, or a server-side config value getting adopted)
+    // -- unlike the plain init above, this also has to refresh whatever's
+    // currently on screen, since the carousel's layout just shifted under it.
+    function updateSwipeViews() {
+      SWIPE_VIEWS = computeSwipeViews();
+      syncPowerPaneDOM();
+      const current = location.hash.slice(1) || 'essentials';
+      if (current === 'power' && !signalkEnabled) {
+        location.hash = 'essentials'; // hashchange -> showView; power just vanished from under the viewer
+      } else {
+        showView(current);
+      }
+    }
 
     // Sub-views all hang off Settings (only reachable via the Config page),
     // so the header/arrows treat them as "currently on Settings" for display
@@ -602,7 +661,33 @@
       'tank-settings': 'fresh-cyl-ts',
     };
 
+    // Remembers whichever tab you're actually on, so a hash-less load (the
+    // MFD/preview simulator rebuilding the app's view on a pane-layout
+    // change reloads it with no hash -- confirmed via the access log, not
+    // just a resize) restores where you were instead of always dropping
+    // back to Essentials. Only consulted for a genuinely hash-less load
+    // (see the initial showView() call below) -- never overrides an
+    // explicit hash already in the URL.
+    const LAST_VIEW_KEY = 'vbp.lastView';
+    function rememberView(name) {
+      try { localStorage.setItem(LAST_VIEW_KEY, name); } catch (err) { /* best-effort */ }
+    }
+    function loadRememberedView() {
+      try { return localStorage.getItem(LAST_VIEW_KEY) || ''; } catch (err) { return ''; }
+    }
+    // A remembered main-page name might not be valid right now even though
+    // it once was -- e.g. "power" while Signal K is currently disabled, in
+    // which case its DOM node isn't even attached to the document (see
+    // syncPowerPaneDOM()). Sub-view names (diagnostics/relays/etc.) aren't
+    // gated by anything, so they're always accepted as-is.
+    function isValidView(name) {
+      if (SWIPE_VIEWS.includes(name)) return true;
+      if (ALL_SWIPE_VIEWS.includes(name)) return false;
+      return true;
+    }
+
     function showView(name) {
+      rememberView(name);
       if (TANK_GAUGE_MOUNTS[name]) moveTankGaugeTo(TANK_GAUGE_MOUNTS[name]);
       const isMain = SWIPE_VIEWS.includes(name);
       const wasMainActive = swipeViewport.classList.contains('active');
@@ -968,6 +1053,16 @@
       }
     }
 
+    // A hash-less load restores whichever tab was last remembered, rather
+    // than always dropping to Essentials -- only when there's no explicit
+    // hash already in the URL, so a real deep-link/back-navigation is never
+    // overridden. Setting location.hash here (before the showView() call
+    // below reads it) is enough -- no separate branch needed.
+    if (!location.hash) {
+      const remembered = loadRememberedView();
+      if (remembered && isValidView(remembered)) location.hash = remembered;
+    }
+
     // tankGaugeEl must exist before showView() can move it into place.
     initTankCylinder();
     showView(location.hash.slice(1) || 'essentials');
@@ -1001,6 +1096,17 @@
           } catch (err) {
             // can't cache locally; server config is still the source of truth next load
           }
+        }
+        if (typeof config.signalk_url === 'string' && !loadCachedSignalkUrl()) {
+          // Only adopt the server's value if this device has no local override yet --
+          // a device-specific override (e.g. dev laptop pointed at venus.local) should
+          // survive even if another device saved a different value server-side.
+          try {
+            localStorage.setItem(SIGNALK_URL_KEY, config.signalk_url);
+          } catch (err) {
+            // can't cache locally; falls back to re-reading server config next load
+          }
+          applySignalkUrlState(config.signalk_url);
         }
       } catch (err) {
         // stay on whatever localStorage already has; calibration form is
@@ -1257,6 +1363,139 @@
       playTankChangeSound(); // plays either way -- lets you confirm it's audible, and the tap unlocks autoplay for later
     }
 
+    // -- Signal K URL: where to fetch electrical.solar/electrical.batteries
+    // from. Defaults to this host on port 3000 (true on the boat, where the
+    // gateway and Signal K run on the same Pi); overridable for dev/demo
+    // setups where they're on different hosts (e.g. Signal K on venus.local).
+    // Checkbox instead of "blank means default" -- a blank/placeholder input
+    // reads as "already filled in" at a glance (bit us once: saved blank
+    // while believing the placeholder text was the actual value), so the
+    // on/off state has to be explicit, not inferred from empty vs. non-empty.
+    // SIGNALK_URL_KEY/loadCachedSignalkUrl live up near SWIPE_VIEWS -- the
+    // carousel's initial layout depends on them before this point runs.
+    // Same localStorage-cache + PUT /config pattern as setTankSoundEnabled.
+    let signalkUrl = '';
+
+    // Accepts what someone would actually type -- "venus.local", "localhost",
+    // "venus.local:8080" -- not just a fully-qualified URL: adds "http://" if
+    // there's no scheme, and ":3000" (Signal K's standard port) if there's no
+    // port either. Only strips a trailing slash; doesn't handle paths, since
+    // nothing here ever needs one.
+    function normalizeSignalkUrl(raw) {
+      let v = raw.trim().replace(/\/+$/, '');
+      if (!v) return '';
+      if (!/^https?:\/\//i.test(v)) v = 'http://' + v;
+      const hostPart = v.slice(v.indexOf('://') + 3);
+      if (!hostPart.includes(':')) v += ':3000';
+      return v;
+    }
+
+    // Reflects a URL (possibly '') onto the checkbox + input and updates
+    // whether Power is in the carousel at all; '' means "use the default",
+    // checked+populated means "custom URL in use".
+    function applySignalkUrlState(url) {
+      signalkUrl = url;
+      document.getElementById('signalk-url-enabled').checked = !!url;
+      document.getElementById('signalk-url-input').value = url;
+      document.getElementById('signalk-url-input').disabled = !url;
+      signalkEnabled = !!url;
+      updateSwipeViews();
+    }
+    applySignalkUrlState(loadCachedSignalkUrl());
+
+    function signalkBaseUrl() {
+      return signalkUrl || `http://${location.hostname}:3000`;
+    }
+
+    // Enables/disables the text field and Power's presence in the carousel
+    // immediately (so you can see the effect right away) -- doesn't persist
+    // the URL itself, Save does that (mirrors every other Config control
+    // here: edit locally, explicit Save to actually write it).
+    function onSignalkUrlEnabledChange() {
+      const input = document.getElementById('signalk-url-input');
+      const checked = document.getElementById('signalk-url-enabled').checked;
+      input.disabled = !checked;
+      // "localhost" is a real answer, not just a placeholder -- true whenever
+      // this browser is running on the same box as Signal K (e.g. the MFD's
+      // own browser on the boat's Pi), so it's a reasonable starting point to
+      // edit from rather than leaving the field empty.
+      if (checked && !input.value.trim()) input.value = 'localhost';
+      signalkEnabled = checked;
+      updateSwipeViews();
+    }
+
+    async function saveSignalkUrl() {
+      const statusEl = document.getElementById('signalk-url-status');
+      const enabled = document.getElementById('signalk-url-enabled').checked;
+      const value = enabled ? normalizeSignalkUrl(document.getElementById('signalk-url-input').value) : '';
+      if (enabled && !value) {
+        statusEl.textContent = 'enter a URL, or uncheck the box to use the default';
+        return;
+      }
+      applySignalkUrlState(value);
+      try {
+        localStorage.setItem(SIGNALK_URL_KEY, value);
+      } catch (err) {
+        // can't cache locally; still persisted server-side below
+      }
+      try {
+        await fetch('/config', {
+          method: 'PUT',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ signalk_url: value }),
+        });
+        statusEl.textContent = 'saved';
+      } catch (err) {
+        statusEl.textContent = 'saved locally (server unreachable)';
+      }
+      fetchElectricalSnapshot();
+    }
+
+    // Tests whatever's currently entered -- not necessarily saved yet --
+    // against the real endpoint, and reports exactly what happened:
+    // network/CORS failure, non-2xx status, bad JSON, or which solar/battery
+    // instance keys were actually found (the thing §1's mismatch was about).
+    // fetch() rejects with a generic "Failed to fetch" for both a dead host
+    // and a CORS block -- JS can't tell those apart, so both get pointed at
+    // the browser console (which shows the real reason) in the message.
+    async function testSignalkUrl() {
+      const statusEl = document.getElementById('signalk-url-status');
+      const enabled = document.getElementById('signalk-url-enabled').checked;
+      if (enabled && !document.getElementById('signalk-url-input').value.trim()) {
+        statusEl.textContent = 'enter a URL, or uncheck the box to test the default';
+        return;
+      }
+      const base = enabled
+        ? normalizeSignalkUrl(document.getElementById('signalk-url-input').value)
+        : `http://${location.hostname}:3000`;
+      const url = `${base}/signalk/v1/api/vessels/self/electrical`;
+      statusEl.textContent = `testing ${url} ...`;
+      let resp;
+      try {
+        resp = await fetch(url);
+      } catch (err) {
+        statusEl.textContent = `unreachable: ${err.message} (check browser console -- often CORS, not a dead host)`;
+        return;
+      }
+      if (!resp.ok) {
+        statusEl.textContent = `HTTP ${resp.status} from ${url}`;
+        return;
+      }
+      let elec;
+      try {
+        elec = await resp.json();
+      } catch (err) {
+        statusEl.textContent = `reached ${url} but response wasn't valid JSON`;
+        return;
+      }
+      const { solarKey, battKey } = pickElectricalInstances(elec);
+      const solarPart = solarKey ? `solar instance '${solarKey}'` : 'no solar instance found';
+      const battPart = battKey
+        ? `battery instance '${battKey}'${elec.batteries[battKey].name ? ` (${elec.batteries[battKey].name.value})` : ''}`
+        : 'no usable battery instance found';
+      statusEl.textContent = `OK -- ${solarPart}, ${battPart}`;
+    }
+
     // Every page with a tank gauge also has its own freshwater/blackwater
     // text+bar elements under this id prefix (cheap plain divs, unlike the
     // <svg> above -- no benefit to sharing those across pages too).
@@ -1299,58 +1538,140 @@
 
     let lastElectrical = null;
 
+    // toFixed() doesn't add a leading '+' for positive numbers -- needed on
+    // the battery current/power rows so the sign (charging vs. discharging)
+    // reads at a glance instead of relying on the reader noticing the
+    // absence of a minus sign.
+    function signed(n, digits) {
+      const s = n.toFixed(digits);
+      return n >= 0 ? `+${s}` : s;
+    }
+
+    // Instance keys aren't fixed: the boat's Victron BLE integration uses
+    // '1'/'0', but Venus OS's own dbus->Signal K bridge assigns its own
+    // instance numbers (e.g. '256') -- discover instead of hardcoding.
+    // Shared by renderPower and the Config tab's "Test connection" button.
+    function pickElectricalInstances(elec) {
+      // Solar: every instance present, not just one -- a real multi-MPPT
+      // boat can have more than one charge controller, and Venus's own demo
+      // data does too. Object.keys() on numeric-string keys like "256"/"258"
+      // iterates in ascending numeric order regardless of insertion order,
+      // so this is deterministic.
+      const solarKeys = elec.solar ? Object.keys(elec.solar) : [];
+      // Batteries: multiple instances are normal (house, starter, hydropack,
+      // alternator-derived...). Prefer one named "house"; otherwise the first
+      // instance that actually has power data (excludes alternator-only
+      // entries and the "-second"-suffixed secondary-voltage-only taps).
+      const battKeys = elec.batteries ? Object.keys(elec.batteries) : [];
+      const battKey = battKeys.find(k => /house/i.test((elec.batteries[k].name || {}).value || ''))
+        || battKeys.find(k => elec.batteries[k].power);
+      return { solarKeys, battKey };
+    }
+
     function renderPower(data) {
       lastElectrical = data;
       const elec = data.electrical;
       console.log('renderPower called with data:', data);
 
-      // Solar charger: device '1' from Victron BLE config
-      const solar = elec.solar['1'];
-      const batt = elec.batteries['0'];
-      console.log('Solar data:', solar);
+      const { solarKeys, battKey } = pickElectricalInstances(elec);
+      const solarList = solarKeys.map(k => elec.solar[k]);
+      const batt = battKey ? elec.batteries[battKey] : null;
+      console.log('Solar instances:', solarKeys, solarList);
       console.log('Battery data:', batt);
 
-      // Infer land charger power: battery current - solar current
-      // If positive, land charger is supplying power
-      const solarCurrent = (solar && solar.current && solar.current.value) || 0;
+      // Prefer the battery-side "current" reading; some chargers (seen in
+      // Venus's own demo data) only publish "panelCurrent" (the panel-side
+      // reading, upstream of the MPPT conversion) instead -- not quite the
+      // same physical quantity, but the closest approximation available
+      // when the battery-side figure isn't published for that instance.
+      const solarInstanceCurrent = (s) => (s.current && s.current.value) || (s.panelCurrent && s.panelCurrent.value) || 0;
+      const solarInstancePower = (s) => (s.panelPower && s.panelPower.value) || 0;
+      const totalSolarCurrent = solarList.reduce((sum, s) => sum + solarInstanceCurrent(s), 0);
+
+      // Infer land charger power: battery current - total solar current
+      // (summed across every solar instance). If positive, land charger is
+      // supplying power.
       const battCurrent = (batt && batt.current && batt.current.value) || 0;
-      const landChargerCurrent = battCurrent - solarCurrent;
-      const landChargerPower = ((batt && batt.voltage && batt.voltage.value) || 12) * Math.max(0, landChargerCurrent);
+      const landChargerCurrent = battCurrent - totalSolarCurrent;
+      const battVoltage = (batt && batt.voltage && batt.voltage.value) || 12;
+      const landChargerPower = battVoltage * Math.max(0, landChargerCurrent);
+
+      // Load has no sensor of its own -- only battery and solar are actually
+      // measured (the charger figure above is already an inference, not a
+      // reading). A load *number* would be a further inference stacked on
+      // top of that inferred charger figure, compounding its error, so it's
+      // deliberately not shown -- only the direction/shape of the diagram
+      // (solar/charger feed the center, battery makes up the difference)
+      // reflects the "load" concept; no wattage is claimed for it.
+      const battPower = (batt && batt.power && batt.power.value) || 0;
+
+      // Victron's own convention (BMV/SmartShunt, confirmed against real
+      // hardware) is the opposite of the generic Signal K schema text:
+      // positive = charging (current into the battery), negative =
+      // discharging (current out) -- not "+ve out" as the spec description
+      // for electrical.batteries.*.current literally says.
+      const battDischarging = battCurrent < -0.5; // negative -- supplying the load's shortfall
+      const battCharging = battCurrent > 0.5;     // positive -- absorbing the load's surplus
+      // Arrowhead direction follows the path's own direction, so the two
+      // flow directions need two different (reversed) paths, not one path
+      // with a conditional marker.
+      const battArrowPath = battDischarging ? 'M 200 220 L 200 190' : 'M 200 190 L 200 220';
+      const battArrowClass = (battDischarging || battCharging) ? 'arrow-active arrow-flowing' : 'arrow-inactive';
+
+      // One box per solar instance -- a single instance (the boat's real
+      // hardware, always exactly one) keeps the original box exactly as it
+      // was; multiple instances stack vertically in the same top-left
+      // region instead of being collapsed into one figure.
+      function solarBoxLayout(count) {
+        if (count <= 1) return [{ x: 20, y: 20, w: 60, h: 50 }];
+        const top = 5, bottom = 95, gap = 8;
+        const h = (bottom - top - gap * (count - 1)) / count;
+        return Array.from({ length: count }, (_, i) => ({ x: 15, w: 65, h, y: top + i * (h + gap) }));
+      }
+      const solarLayout = solarBoxLayout(Math.max(1, solarList.length));
+      const solarNodesSvg = (solarList.length ? solarList : [null]).map((s, i) => {
+        const L = solarLayout[i];
+        const power = s ? solarInstancePower(s) : 0;
+        const current = s ? solarInstanceCurrent(s) : 0;
+        const label = solarList.length > 1 ? `SOLAR ${i + 1}` : 'SOLAR';
+        const startX = L.x + L.w, startY = L.y + L.h / 2;
+        return `
+          <rect x="${L.x}" y="${L.y}" width="${L.w}" height="${L.h}" fill="none" stroke="var(--brass)" stroke-width="2" rx="4"/>
+          <text x="${L.x + L.w / 2}" y="${L.y + L.h * 0.35}" class="power-label" fill="var(--text-primary)">${label}</text>
+          <text x="${L.x + L.w / 2}" y="${L.y + L.h * 0.85}" class="power-value" fill="var(--text-primary)">${power.toFixed(0)}W</text>
+          <path d="M ${startX} ${startY} Q 140 100 160 110" class="arrow-${current > 0.5 ? 'active arrow-flowing' : 'inactive'}" fill="none" marker-end="url(#arrowhead)"/>
+          <text x="${startX + 12}" y="${startY + 15}" class="power-value" fill="var(--text-primary)">${current.toFixed(1)}A</text>
+        `;
+      }).join('');
 
       // Generate power flow diagram
       const diagram = `
         <svg viewBox="0 0 400 300" id="power-diagram">
-          <!-- Solar panel (top left) -->
-          <rect x="20" y="20" width="60" height="50" fill="none" stroke="var(--brass)" stroke-width="2" rx="4"/>
-          <text x="50" y="35" class="power-label" fill="var(--text-primary)">SOLAR</text>
-          <text x="50" y="63" class="power-value" fill="var(--text-primary)">${((solar && solar.panelPower && solar.panelPower.value) || 0).toFixed(0)}W</text>
+          <!-- Solar panel(s) (top left) -->
+          ${solarNodesSvg}
 
           <!-- Land charger (top right) -->
           <rect x="320" y="20" width="60" height="50" fill="none" stroke="${landChargerCurrent > 0 ? 'var(--brass)' : 'var(--text-secondary)'}" stroke-width="2" rx="4"/>
           <text x="350" y="35" class="power-label" fill="var(--text-primary)">CHARGER</text>
           <text x="350" y="63" class="power-value" fill="var(--text-primary)">${Math.max(0, landChargerPower).toFixed(0)}W</text>
 
-          <!-- Battery (center) -->
+          <!-- Load (center -- the node solar and the charger both feed; no
+               wattage shown, it's not a measured value -- see comment above) -->
           <circle cx="200" cy="150" r="40" fill="none" stroke="var(--brass)" stroke-width="3"/>
-          <text x="200" y="145" class="power-label" fill="var(--text-primary)">BATTERY</text>
-          <text x="200" y="160" class="power-value" fill="var(--text-primary)">${(((batt && batt.capacity && batt.capacity.stateOfCharge && batt.capacity.stateOfCharge.value) || 0) * 100).toFixed(0)}%</text>
+          <text x="200" y="155" class="power-label" fill="var(--text-primary)">LOAD</text>
 
-          <!-- Load (bottom) -->
-          <rect x="320" y="220" width="60" height="50" fill="none" stroke="var(--brass)" stroke-width="2" rx="4"/>
-          <text x="350" y="235" class="power-label" fill="var(--text-primary)">LOAD</text>
-          <text x="350" y="263" class="power-value" fill="var(--text-primary)">${Math.abs((batt && batt.power && batt.power.value) || 0).toFixed(0)}W</text>
+          <!-- Battery (bottom -- makes up whatever solar+charger don't cover) -->
+          <rect x="170" y="220" width="60" height="50" fill="none" stroke="var(--brass)" stroke-width="2" rx="4"/>
+          <text x="200" y="235" class="power-label" fill="var(--text-primary)">BATTERY</text>
+          <text x="200" y="263" class="power-value" fill="var(--text-primary)">${(((batt && batt.capacity && batt.capacity.stateOfCharge && batt.capacity.stateOfCharge.value) || 0) * 100).toFixed(0)}%</text>
 
-          <!-- Arrow: Solar → Battery -->
-          <path d="M 80 45 Q 140 100 160 110" class="arrow-${solarCurrent > 0.5 ? 'active arrow-flowing' : 'inactive'}" fill="none" marker-end="url(#arrowhead)"/>
-          <text x="110" y="70" class="power-value" fill="var(--text-primary)">${solarCurrent.toFixed(1)}A</text>
-
-          <!-- Arrow: Charger → Battery -->
+          <!-- Arrow: Charger → Load -->
           <path d="M 320 45 Q 260 100 240 110" class="arrow-${landChargerCurrent > 0.5 ? 'active arrow-flowing' : 'inactive'}" fill="none" marker-end="url(#arrowhead)"/>
           ${landChargerCurrent > 0.5 ? `<text x="290" y="70" class="power-value" fill="var(--text-primary)">${landChargerCurrent.toFixed(1)}A</text>` : ''}
 
-          <!-- Arrow: Battery → Load -->
-          <path d="M 240 185 Q 280 200 310 235" class="arrow-active arrow-flowing" fill="none" marker-end="url(#arrowhead)"/>
-          <text x="270" y="210" class="power-value" fill="var(--text-primary)">${Math.abs(battCurrent).toFixed(1)}A</text>
+          <!-- Arrow: Battery ↔ Load -- direction flips with which way current is flowing -->
+          <path d="${battArrowPath}" class="${battArrowClass}" fill="none" marker-end="url(#arrowhead)"/>
+          <text x="215" y="208" class="power-value" fill="var(--text-primary)">${Math.abs(battCurrent).toFixed(1)}A</text>
 
           <defs>
             <marker id="arrowhead" markerWidth="10" markerHeight="10" refX="9" refY="3" orient="auto">
@@ -1359,15 +1680,22 @@
           </defs>
         </svg>
       `;
-      const detailedHtml = diagram + (solar ? `
-        <h4 style="margin-top: 20px; color: var(--text-primary);">Solar Details</h4>
-        <div class="battery-row"><span>Mode</span><span style="color:var(--text-primary)">${(solar.chargingMode && solar.chargingMode.value) || '&mdash;'}</span></div>
-        <div class="battery-row"><span>Yield today</span><span style="color:var(--text-primary)">${(((solar.yieldToday && solar.yieldToday.value) || 0) / 3.6e6).toFixed(1)} kWh</span></div>
+      // "chargingMode" doesn't exist in Venus's own demo data at all (it
+      // uses "operationMode"/"mode" instead) -- was always silently falling
+      // back to the em-dash there. operationMode's the more descriptive of
+      // the two ("mppt active" vs. "on"), so it's tried first now.
+      const solarDetailsHtml = solarList.map((s, i) => `
+        <h4 style="margin-top: 20px; color: var(--text-primary);">${solarList.length > 1 ? `Solar ${i + 1}` : 'Solar'} Details</h4>
+        <div class="battery-row"><span>Mode</span><span style="color:var(--text-primary)">${(s.operationMode && s.operationMode.value) || (s.chargingMode && s.chargingMode.value) || (s.mode && s.mode.value) || '&mdash;'}</span></div>
+        <div class="battery-row"><span>Yield today</span><span style="color:var(--text-primary)">${(((s.yieldToday && s.yieldToday.value) || 0) / 3.6e6).toFixed(1)} kWh</span></div>
+      `).join('');
+      const detailedHtml = diagram + (solarList.length ? `
+        ${solarDetailsHtml}
         ${landChargerCurrent > 0.5 ? `<h4 style="margin-top: 20px; color: var(--text-primary);">Land Charger</h4><div class="battery-row"><span>Current</span><span style="color:var(--text-primary)">${landChargerCurrent.toFixed(2)} A</span></div>` : ''}
         <h4 style="margin-top: 20px; color: var(--text-primary);">Battery Details</h4>
-        <div class="battery-row"><span>Voltage</span><span style="color:var(--text-primary)">${((batt && batt.voltage && batt.voltage.value) || 0).toFixed(2)} V</span></div>
-        <div class="battery-row"><span>Current (net)</span><span style="color:var(--text-primary)">${(battCurrent).toFixed(2)} A</span></div>
-        <div class="battery-row"><span>Power</span><span style="color:var(--text-primary)">${((batt && batt.power && batt.power.value) || 0).toFixed(1)} W</span></div>
+        <div class="battery-row"><span>Voltage</span><span style="color:var(--text-primary)">${battVoltage.toFixed(2)} V</span></div>
+        <div class="battery-row"><span>Current (+charging)</span><span style="color:var(--text-primary)">${signed(battCurrent, 2)} A</span></div>
+        <div class="battery-row"><span>Power (+charging)</span><span style="color:var(--text-primary)">${signed(battPower, 1)} W</span></div>
         <div class="battery-row"><span>Time remaining</span><span style="color:var(--text-primary)">${((((batt && batt.capacity && batt.capacity.timeRemaining && batt.capacity.timeRemaining.value) || 0) / 3600).toFixed(1))} h</span></div>
       ` : 'No solar charger data available');
       document.getElementById('power-solar').innerHTML = detailedHtml;
@@ -1388,8 +1716,10 @@
 
     async function fetchElectricalSnapshot() {
       try {
-        // Signal K runs on port 3000; fetch directly (works from PC, falls back to WebSocket deltas from MFD)
-        const url = `http://${location.hostname}:3000/signalk/v1/api/vessels/self/electrical`;
+        // Fetched directly from the browser (works from PC, falls back to WebSocket
+        // deltas from MFD) -- base URL is configurable (Config tab) since Signal K
+        // isn't always on the same host as the gateway serving this page.
+        const url = `${signalkBaseUrl()}/signalk/v1/api/vessels/self/electrical`;
         const resp = await fetch(url);
         if (resp.ok) {
           const elec = await resp.json();
