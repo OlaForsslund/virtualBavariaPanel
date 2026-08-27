@@ -1588,13 +1588,15 @@
       const solarInstancePower = (s) => (s.panelPower && s.panelPower.value) || 0;
       const totalSolarCurrent = solarList.reduce((sum, s) => sum + solarInstanceCurrent(s), 0);
 
-      // Infer land charger power: battery current - total solar current
-      // (summed across every solar instance). If positive, land charger is
-      // supplying power.
+      // Infer charger power: battery current - total solar current (summed
+      // across every solar instance). If positive, something other than
+      // solar is supplying power -- could be a land/shore charger, could be
+      // the engine alternator; this can't tell which, so it's just
+      // "Charger", not "Land Charger".
       const battCurrent = (batt && batt.current && batt.current.value) || 0;
-      const landChargerCurrent = battCurrent - totalSolarCurrent;
+      const chargerCurrent = battCurrent - totalSolarCurrent;
       const battVoltage = (batt && batt.voltage && batt.voltage.value) || 12;
-      const landChargerPower = battVoltage * Math.max(0, landChargerCurrent);
+      const chargerPower = battVoltage * Math.max(0, chargerCurrent);
 
       // Load has no sensor of its own -- only battery and solar are actually
       // measured (the charger figure above is already an inference, not a
@@ -1650,10 +1652,10 @@
           <!-- Solar panel(s) (top left) -->
           ${solarNodesSvg}
 
-          <!-- Land charger (top right) -->
-          <rect x="320" y="20" width="60" height="50" fill="none" stroke="${landChargerCurrent > 0 ? 'var(--brass)' : 'var(--text-secondary)'}" stroke-width="2" rx="4"/>
+          <!-- Charger (top right) -->
+          <rect x="320" y="20" width="60" height="50" fill="none" stroke="${chargerCurrent > 0 ? 'var(--brass)' : 'var(--text-secondary)'}" stroke-width="2" rx="4"/>
           <text x="350" y="35" class="power-label" fill="var(--text-primary)">CHARGER</text>
-          <text x="350" y="63" class="power-value" fill="var(--text-primary)">${Math.max(0, landChargerPower).toFixed(0)}W</text>
+          <text x="350" y="63" class="power-value" fill="var(--text-primary)">${Math.max(0, chargerPower).toFixed(0)}W</text>
 
           <!-- Load (center -- the node solar and the charger both feed; no
                wattage shown, it's not a measured value -- see comment above) -->
@@ -1666,8 +1668,8 @@
           <text x="200" y="263" class="power-value" fill="var(--text-primary)">${(((batt && batt.capacity && batt.capacity.stateOfCharge && batt.capacity.stateOfCharge.value) || 0) * 100).toFixed(0)}%</text>
 
           <!-- Arrow: Charger → Load -->
-          <path d="M 320 45 Q 260 100 240 110" class="arrow-${landChargerCurrent > 0.5 ? 'active arrow-flowing' : 'inactive'}" fill="none" marker-end="url(#arrowhead)"/>
-          ${landChargerCurrent > 0.5 ? `<text x="290" y="70" class="power-value" fill="var(--text-primary)">${landChargerCurrent.toFixed(1)}A</text>` : ''}
+          <path d="M 320 45 Q 260 100 240 110" class="arrow-${chargerCurrent > 0 ? 'active arrow-flowing' : 'inactive'}" fill="none" marker-end="url(#arrowhead)"/>
+          ${chargerCurrent > 0 ? `<text x="290" y="70" class="power-value" fill="var(--text-primary)">${chargerCurrent.toFixed(1)}A + Load</text>` : ''}
 
           <!-- Arrow: Battery ↔ Load -- direction flips with which way current is flowing -->
           <path d="${battArrowPath}" class="${battArrowClass}" fill="none" marker-end="url(#arrowhead)"/>
@@ -1691,7 +1693,7 @@
       `).join('');
       const detailedHtml = diagram + (solarList.length ? `
         ${solarDetailsHtml}
-        ${landChargerCurrent > 0.5 ? `<h4 style="margin-top: 20px; color: var(--text-primary);">Land Charger</h4><div class="battery-row"><span>Current</span><span style="color:var(--text-primary)">${landChargerCurrent.toFixed(2)} A</span></div>` : ''}
+        ${chargerCurrent > 0 ? `<h4 style="margin-top: 20px; color: var(--text-primary);">Charger</h4><div class="battery-row"><span>Current</span><span style="color:var(--text-primary)">${chargerCurrent.toFixed(2)} A</span></div>` : ''}
         <h4 style="margin-top: 20px; color: var(--text-primary);">Battery Details</h4>
         <div class="battery-row"><span>Voltage</span><span style="color:var(--text-primary)">${battVoltage.toFixed(2)} V</span></div>
         <div class="battery-row"><span>Current (+charging)</span><span style="color:var(--text-primary)">${signed(battCurrent, 2)} A</span></div>
