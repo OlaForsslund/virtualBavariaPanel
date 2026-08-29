@@ -126,7 +126,29 @@ panel, panel toggle overrides web; see `architecture.md` §5).
 - Run the gateway against the real panel and/or relay board in place of
   the simulators — no code changes required.
 
-## 7. Testing Strategy
+## 7. Redeployment Workflow
+
+Once the gateway is deployed to a Pi with systemd, the iterative dev workflow
+is:
+
+```
+sudo systemctl stop vbp-gateway.service
+# Update code (git pull, copy files, etc.)
+sudo systemctl start vbp-gateway.service
+```
+
+If you've modified the systemd unit files themselves, also run:
+
+```
+sudo systemctl daemon-reload
+```
+
+You don't need to restart `vbp-can0.service` — the CAN interface stays up.
+
+For webapp frontend changes (`webapp/`), you also need a hard refresh in your
+browser to clear any cached assets.
+
+## 8. Testing Strategy
 
 - **Unit tests** — pure domain/state-machine logic, no CAN bus involved.
   Fast, run anywhere, including CI.

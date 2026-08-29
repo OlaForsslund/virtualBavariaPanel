@@ -26,6 +26,10 @@ yacht's shared panel/relay-board bus. Read these before touching code:
 - `GatewayStateMachine` is **single-threaded**: only the runtime main loop may
   call it. Cross-thread hand-off is the lock-free `StreamBuffer` only. A future
   web interface must queue commands into the main loop, never call directly.
+- **When running live on the boat**: do not restart `vbp-gateway.service` or
+  other services without explicit confirmation from the user first. Webapp
+  updates (HTML/CSS/JS changes) don't need a restart — just tell the user to
+  reload the browser. Only ask for restart if code changes require it.
 
 ## Code layout
 

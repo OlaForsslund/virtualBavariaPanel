@@ -98,11 +98,11 @@ panel.
 #### Navico MFD app
 
 It can also show up as an app tile directly on Navico (B&G/Simrad/
-Lowrance) chartplotters, via `deploy/usr/local/bin/mfd-app-announce.py`
-(+ `deploy/etc/systemd/system/mfd-app-announce.service`), which broadcasts
-the webapp using Navico's app-announcement protocol. Tested working on a
-B&G Zeus3 — see `mfd_display_notes.md` for what its embedded browser does
-and doesn't support.
+Lowrance) chartplotters using the Navico UDP multicast announcement protocol.
+See `navico-app-announce.md` for deployment, configuration, and troubleshooting.
 
-**Requirement:** the MFD only discovers/loads the app over its wired 
-Ethernet — a WLAN connection from the MFD will not work for this.
+**Requirement:** the MFD only discovers/loads the app over its **wired Ethernet** 
+connection — WLAN will not work for discovery.
+
+Tested working on a B&G Zeus3 — see `mfd_display_notes-zeus3-7.md` for 
+what its embedded browser does and doesn't support.

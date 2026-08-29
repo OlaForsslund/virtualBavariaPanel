@@ -430,14 +430,14 @@
         <p><button class="action-btn" id="theme-btn" onclick="cycleTheme()"></button></p>
         <p>
           <label><input type="checkbox" id="signalk-url-enabled" onchange="onSignalkUrlEnabledChange()"> Show Power page (needs a Signal K source for solar/shunt data)</label><br>
-          <input type="text" id="signalk-url-input" placeholder="localhost" style="width: 100%; box-sizing: border-box;" disabled>
+          <input type="text" id="signalk-url-input" placeholder="localhost" style="width: 100%; box-sizing: border-box;" disabled onfocus="this.scrollIntoView({behavior: 'smooth', block: 'start'})">
           <button class="action-btn" onclick="saveSignalkUrl()">Save</button>
           <button class="action-btn" onclick="testSignalkUrl()">Test connection</button>
         </p>
         <p style="color: var(--text-secondary); font-size: 0.9em;">
-          "localhost" if Signal K runs on this same box; try "venus.local" for a
-          Venus OS GX device on the network. No need to type "http://" or a port
-          &mdash; port 3000 is assumed.
+          Examples: <code id="signalk-example-ip"></code> (this device),
+          <code>venus.local</code> (Venus OS GX device). No need to type
+          "http://" or a port &mdash; port 3000 is assumed.
         </p>
         <p id="signalk-url-status"></p>
       </section>
@@ -1415,14 +1415,13 @@
       const input = document.getElementById('signalk-url-input');
       const checked = document.getElementById('signalk-url-enabled').checked;
       input.disabled = !checked;
-      // "localhost" is a real answer, not just a placeholder -- true whenever
-      // this browser is running on the same box as Signal K (e.g. the MFD's
-      // own browser on the boat's Pi), so it's a reasonable starting point to
-      // edit from rather than leaving the field empty.
-      if (checked && !input.value.trim()) input.value = 'localhost';
+      // Default to the IP address the page was loaded from so Signal K works out of the box
+      if (checked && !input.value.trim()) input.value = location.hostname;
       signalkEnabled = checked;
       updateSwipeViews();
     }
+    // Populate the example IP in the help text
+    document.getElementById('signalk-example-ip').textContent = location.hostname;
 
     async function saveSignalkUrl() {
       const statusEl = document.getElementById('signalk-url-status');
@@ -1488,8 +1487,8 @@
         statusEl.textContent = `reached ${url} but response wasn't valid JSON`;
         return;
       }
-      const { solarKey, battKey } = pickElectricalInstances(elec);
-      const solarPart = solarKey ? `solar instance '${solarKey}'` : 'no solar instance found';
+      const { solarKeys, battKey } = pickElectricalInstances(elec);
+      const solarPart = solarKeys.length ? `${solarKeys.length} solar instance(s): ${solarKeys.join(', ')}` : 'no solar instance found';
       const battPart = battKey
         ? `battery instance '${battKey}'${elec.batteries[battKey].name ? ` (${elec.batteries[battKey].name.value})` : ''}`
         : 'no usable battery instance found';
@@ -1571,13 +1570,10 @@
     function renderPower(data) {
       lastElectrical = data;
       const elec = data.electrical;
-      console.log('renderPower called with data:', data);
 
       const { solarKeys, battKey } = pickElectricalInstances(elec);
       const solarList = solarKeys.map(k => elec.solar[k]);
       const batt = battKey ? elec.batteries[battKey] : null;
-      console.log('Solar instances:', solarKeys, solarList);
-      console.log('Battery data:', batt);
 
       // Prefer the battery-side "current" reading; some chargers (seen in
       // Venus's own demo data) only publish "panelCurrent" (the panel-side
@@ -1591,8 +1587,7 @@
       // Infer charger power: battery current - total solar current (summed
       // across every solar instance). If positive, something other than
       // solar is supplying power -- could be a land/shore charger, could be
-      // the engine alternator; this can't tell which, so it's just
-      // "Charger", not "Land Charger".
+      // the engine alternator.
       const battCurrent = (batt && batt.current && batt.current.value) || 0;
       const chargerCurrent = battCurrent - totalSolarCurrent;
       const battVoltage = (batt && batt.voltage && batt.voltage.value) || 12;
@@ -1614,10 +1609,9 @@
       // for electrical.batteries.*.current literally says.
       const battDischarging = battCurrent < -0.5; // negative -- supplying the load's shortfall
       const battCharging = battCurrent > 0.5;     // positive -- absorbing the load's surplus
-      // Arrowhead direction follows the path's own direction, so the two
-      // flow directions need two different (reversed) paths, not one path
-      // with a conditional marker.
-      const battArrowPath = battDischarging ? 'M 200 220 L 200 190' : 'M 200 190 L 200 220';
+      // Arrowhead direction follows the path's own direction. Load is at cy=110 r=40 (bottom at 150),
+      // battery at y=220. Discharging (neg): arrow from battery to load. Charging (pos): arrow from load to battery.
+      const battArrowPath = battDischarging ? 'M 200 220 L 200 150' : 'M 200 150 L 200 220';
       const battArrowClass = (battDischarging || battCharging) ? 'arrow-active arrow-flowing' : 'arrow-inactive';
 
       // One box per solar instance -- a single instance (the boat's real
@@ -1641,7 +1635,7 @@
           <rect x="${L.x}" y="${L.y}" width="${L.w}" height="${L.h}" fill="none" stroke="var(--brass)" stroke-width="2" rx="4"/>
           <text x="${L.x + L.w / 2}" y="${L.y + L.h * 0.35}" class="power-label" fill="var(--text-primary)">${label}</text>
           <text x="${L.x + L.w / 2}" y="${L.y + L.h * 0.85}" class="power-value" fill="var(--text-primary)">${power.toFixed(0)}W</text>
-          <path d="M ${startX} ${startY} Q 140 100 160 110" class="arrow-${current > 0.5 ? 'active arrow-flowing' : 'inactive'}" fill="none" marker-end="url(#arrowhead)"/>
+          <path d="M ${startX} ${startY} Q 140 100 160 110" class="arrow-${current > 0 ? 'active arrow-flowing' : 'inactive'}" fill="none" marker-end="url(#arrowhead)"/>
           <text x="${startX + 12}" y="${startY + 15}" class="power-value" fill="var(--text-primary)">${current.toFixed(1)}A</text>
         `;
       }).join('');
@@ -1653,27 +1647,31 @@
           ${solarNodesSvg}
 
           <!-- Charger (top right) -->
-          <rect x="320" y="20" width="60" height="50" fill="none" stroke="${chargerCurrent > 0 ? 'var(--brass)' : 'var(--text-secondary)'}" stroke-width="2" rx="4"/>
-          <text x="350" y="35" class="power-label" fill="var(--text-primary)">CHARGER</text>
+          <rect x="320" y="20" width="60" height="50" fill="none" stroke="${chargerCurrent > 2 ? 'var(--brass)' : 'var(--text-secondary)'}" stroke-width="2" rx="4"/>
+          <text x="350" y="35" class="power-label" fill="var(--text-primary)">CHARGER/Alternator</text>
           <text x="350" y="63" class="power-value" fill="var(--text-primary)">${Math.max(0, chargerPower).toFixed(0)}W</text>
 
           <!-- Load (center -- the node solar and the charger both feed; no
                wattage shown, it's not a measured value -- see comment above) -->
-          <circle cx="200" cy="150" r="40" fill="none" stroke="var(--brass)" stroke-width="3"/>
-          <text x="200" y="155" class="power-label" fill="var(--text-primary)">LOAD</text>
+          <circle cx="200" cy="110" r="40" fill="none" stroke="var(--brass)" stroke-width="3"/>
+          <text x="200" y="115" class="power-label" fill="var(--text-primary)">LOAD</text>
 
           <!-- Battery (bottom -- makes up whatever solar+charger don't cover) -->
           <rect x="170" y="220" width="60" height="50" fill="none" stroke="var(--brass)" stroke-width="2" rx="4"/>
           <text x="200" y="235" class="power-label" fill="var(--text-primary)">BATTERY</text>
           <text x="200" y="263" class="power-value" fill="var(--text-primary)">${(((batt && batt.capacity && batt.capacity.stateOfCharge && batt.capacity.stateOfCharge.value) || 0) * 100).toFixed(0)}%</text>
 
-          <!-- Arrow: Charger → Load -->
-          <path d="M 320 45 Q 260 100 240 110" class="arrow-${chargerCurrent > 0 ? 'active arrow-flowing' : 'inactive'}" fill="none" marker-end="url(#arrowhead)"/>
-          ${chargerCurrent > 0 ? `<text x="290" y="70" class="power-value" fill="var(--text-primary)">${chargerCurrent.toFixed(1)}A + Load</text>` : ''}
+          <!-- Arrow: Charger → Battery (Charge current) -->
+          <path d="M 320 45 Q 260 130 230 140" class="arrow-${chargerCurrent > 2 ? 'active arrow-flowing' : 'inactive'}" fill="none" marker-end="url(#arrowhead)"/>
+          ${chargerCurrent > 2 ? `<text x="280" y="85" class="power-value" fill="var(--text-primary)">Charge</text><text x="280" y="105" class="power-value" fill="var(--text-primary)">${chargerCurrent.toFixed(1)}A</text>` : ''}
+
+          <!-- Arrow: Charger → Load (shows charger supplies load power when active) -->
+          <path d="M 320 55 Q 270 80 240 100" class="arrow-${chargerCurrent > 2 ? 'active arrow-flowing' : 'inactive'}" fill="none" marker-end="url(#arrowhead)"/>
+          ${chargerCurrent > 2 ? `<text x="275" y="65" class="power-value" fill="var(--text-primary)">Load</text>` : ''}
 
           <!-- Arrow: Battery ↔ Load -- direction flips with which way current is flowing -->
           <path d="${battArrowPath}" class="${battArrowClass}" fill="none" marker-end="url(#arrowhead)"/>
-          <text x="215" y="208" class="power-value" fill="var(--text-primary)">${Math.abs(battCurrent).toFixed(1)}A</text>
+          <text x="215" y="190" class="power-value" fill="var(--text-primary)">${Math.abs(battCurrent).toFixed(1)}A</text>
 
           <defs>
             <marker id="arrowhead" markerWidth="10" markerHeight="10" refX="9" refY="3" orient="auto">
@@ -1767,25 +1765,19 @@
           if (bat && lastSensors) {
             lastSensors.electrical.batteries[bat[1]].voltage = value;
             sensorsChanged = true;
-            continue;
           }
           // Handle electrical.solar.* and other electrical.batteries.* updates for Power page
           if ((path.match(/^electrical\.solar\./) || path.match(/^electrical\.batteries\./)) && lastElectrical) {
-            // Deep-set the value at path in lastElectrical.
-            // e.g. "electrical.solar.1.voltage.value" -> lastElectrical.solar['1'].voltage.value = value
             const parts = path.split('.');
-            let obj = lastElectrical;
-            // Navigate to parent (skip 'electrical' prefix)
-            for (let i = 1; i < parts.length - 2; i++) {
+            let obj = lastElectrical.electrical;
+            for (let i = 1; i < parts.length - 1; i++) {
               if (!obj[parts[i]]) obj[parts[i]] = {};
               obj = obj[parts[i]];
             }
-            // Create/update the second-to-last level with .value
-            const fieldName = parts[parts.length - 2];
+            const fieldName = parts[parts.length - 1];
             if (!obj[fieldName]) obj[fieldName] = {};
             obj[fieldName].value = value;
             electricalChanged = true;
-            continue;
           }
           const tank = path.match(/^tanks\.(freshWater|blackWater)\.currentLevel$/);
           if (tank && lastSensors) {
@@ -1833,7 +1825,34 @@
         setTimeout(connectSubscribe, RECONNECT_MS);
       };
     }
-    seedConfigFromServer().then(connectSubscribe);
+    function connectSignalKSubscribe() {
+      try {
+        const base = signalkBaseUrl();
+        const proto = base.startsWith('https') ? 'wss:' : 'ws:';
+        const host = base.replace(/^https?:\/\//, '').replace(':3000', '');
+        const ws = new WebSocket(`${proto}//${host}:3000/signalk/v1/stream?subscribe=electrical.*,tanks.*`);
+        ws.onopen = () => {};
+        ws.onmessage = (msg) => {
+          try {
+            const delta = JSON.parse(msg.data);
+            if (delta.updates) applyDelta(delta.updates);
+          } catch (err) {
+            // parse error on malformed delta
+          }
+        };
+        ws.onerror = () => ws.close();
+        ws.onclose = () => {
+          setTimeout(connectSignalKSubscribe, RECONNECT_MS);
+        };
+      } catch (err) {
+        // connection setup failed, will retry
+      }
+    }
+
+    seedConfigFromServer().then(() => {
+      connectSubscribe();
+      connectSignalKSubscribe();
+    });
 
     // -- diagnostics: live window/screen/storage report --
     function testStorage(storage) {

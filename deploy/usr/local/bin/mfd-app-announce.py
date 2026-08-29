@@ -11,7 +11,7 @@ APP_PATH = "/"
 APP_NAME = "Bavaria Panel"
 APP_DESC = "Virtual Bavaria Panel"
 ICON_PATH = "/android-chrome-192x192.png"
-SOURCE_ID = "olaspi"
+SOURCE_ID = "nauticore"
 
 
 def get_ipv4_addrs():
