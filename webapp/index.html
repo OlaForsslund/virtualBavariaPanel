@@ -99,6 +99,7 @@
       --btn-inset-highlight: rgba(255,255,255,0.05);
       --circuit-border: rgba(201,154,75,0.35);
       --heading-weight: normal;
+      --cold: #A6E4FA;
     }
     :root[data-theme="day"] {
       --surface: #163A54;
@@ -115,6 +116,7 @@
       --btn-inset-highlight: rgba(255,255,255,0.14);
       --circuit-border: rgba(255,201,77,0.55);
       --heading-weight: bold;
+      --cold: #9FDDF2;
     }
     /* Belt-and-braces: the narrowest MFD split (autopilot expanded, quarter
        pane, ~318px -- mfd_display_notes-zeus3-7.md) leaves very little room
@@ -193,6 +195,11 @@
     #swipe-viewport { overflow: hidden; position: relative; padding: 0; }
     #swipe-track {
       display: flex;
+      /* Without this, panes stretch to the tallest pane's height (flex's
+         default align-items: stretch) and syncSwipeHeight() measures that
+         rather than the active pane's own content -- leaving dead space and,
+         on Overview, pushing the page past the viewport into a scroll. */
+      align-items: flex-start;
       width: calc(100% * var(--swipe-pages, 4));
       transition: transform 260ms ease;
     }
@@ -310,6 +317,12 @@
     .gauge-bar { background: var(--surface-hover); border-radius: 6px; height: 14px; overflow: hidden; }
     .gauge-fill { background: var(--accent); height: 100%; transition: width 0.3s; }
     .gauge-value { font-size: 0.85em; color: var(--text-secondary); margin-top: 2px; text-align: right; }
+    /* Overview's bars read like a scale: the current level sits centred under
+       the bar, the tank's full capacity marks the right-hand end. The max is
+       absolutely positioned so the current value is centred on the bar
+       itself rather than on the space left over beside it. */
+    .gauge-scale { position: relative; margin-top: 2px; font-size: 0.85em; color: var(--text-secondary); text-align: center; }
+    .gauge-max { position: absolute; right: 0; top: 0; }
     /* Freshwater cylinder gauge -- see initTankCylinder()/setTankCylinderLevel().
        Same viewBox as the design source; scaled down to fit the sidebar. */
     .tank-cylinder-mount svg { width: 100%; max-width: 170px; height: auto; overflow: visible; display: block; margin: 0 auto; }
@@ -337,12 +350,72 @@
       margin-bottom: 20px;
       display: block;
     }
-    .power-label { font-size: 0.85em; font-weight: bold; text-anchor: middle; }
-    .power-value { font-size: 0.75em; text-anchor: middle; }
+    .power-label { font-size: 1.05em; font-weight: bold; text-anchor: middle; }
+    .power-value { font-size: 0.95em; text-anchor: middle; }
+    /* State of charge sits inside the battery icon, which carries no label
+       of its own -- so it's the figure's title as well as its value. */
+    .power-soc { font-size: 1.4em; font-weight: bold; text-anchor: middle; }
+    .power-diagram { display: block; }
     .arrow-active { stroke: var(--brass); stroke-width: 3; }
     .arrow-inactive { stroke: var(--text-secondary); stroke-width: 2; opacity: 0.3; }
     @keyframes flow { 0% { stroke-dashoffset: 0; } 100% { stroke-dashoffset: -8px; } }
     .arrow-flowing { animation: flow 0.8s linear infinite; stroke-dasharray: 4, 4; }
+
+    /* -- Overview page --------------------------------------------------
+       The rig is a triangle with the mast ~70% across the artwork, so the
+       upper-left of the pane is empty real estate -- that's where the
+       (identical) Power diagram and the tank bars go, rather than a
+       column beside the boat.
+
+       The masthead deliberately rises into the nav bar, as in the design
+       sketch. #swipe-viewport clips at its padding box, so the boat can
+       only reach up there if the viewport itself extends back behind the
+       nav: hence the margin-top/padding-top pair, which cancel out so
+       nothing else moves. Applied only while Overview is the active page,
+       so every other pane is untouched. --nav-h is measured at runtime
+       (syncNavHeight) rather than hardcoded -- the nav's height follows
+       the arrow font size, which the 360px media query changes. */
+    /* The nav has to stay ABOVE the overlapping pane, or it covers the
+       arrows and swallows their clicks. The mast still reads as rising into
+       the header because the bar itself is transparent there -- only the
+       arrow buttons and the centred label text are opaque, and the mast
+       passes between them. */
+    body.overview-active nav { position: relative; z-index: 3; border-bottom-color: transparent; }
+    body.overview-active #nav-label { background: transparent; }
+    body.overview-active #swipe-viewport {
+      position: relative;
+      z-index: 2;
+      margin-top: calc(-1 * var(--nav-h, 48px));
+      padding-top: var(--nav-h, 48px);
+    }
+    .ov-wrap { display: flex; align-items: flex-start; gap: 12px; }
+    .ov-col { flex: 1 1 auto; min-width: 0; }
+    .ov-boat { flex: 0 0 auto; margin-top: calc(-1 * var(--nav-h, 48px)); }
+    /* Sized by syncOverviewLayout(), not CSS: this Chromium predates
+       aspect-ratio sizing of an <svg> from viewBox + one dimension, so
+       both are set explicitly. overflow:visible lets the stern/deck beams
+       spill outside the viewBox and wash over the data column, which is
+       the point of them. */
+    .ov-boat svg { display: block; overflow: visible; }
+    .ov-light { cursor: pointer; }
+    .ov-glow { opacity: 0; transition: opacity 200ms; }
+    .ov-dot { transition: fill 200ms; }
+    .ov-fridge-icon { stroke: var(--cold); }
+    .ov-fridge-value { fill: var(--cold); }
+    /* Hull art is a builder's line drawing, hardcoded white/blue rather
+       than themed -- knock it back at night so it isn't the brightest
+       thing on a dark helm. */
+    :root[data-theme="night"] .ov-boat { opacity: 0.72; }
+    .ov-tanks { margin-top: 12px; max-width: 460px; }
+    .ov-env { margin-top: 12px; }
+    /* Below 620px -- the same cutoff .sensors-panel uses, chosen because it
+       clears the 642px autopilot-expanded pane and excludes every split
+       width -- the wedge has no room. Stack, and let the body scroll:
+       also what a phone in portrait wants. */
+    @media (max-width: 619px) {
+      .ov-wrap { display: block; }
+      .ov-boat { margin-top: 0; }
+    }
   </style>
 </head>
 <body>
@@ -354,6 +427,218 @@
 
   <div id="swipe-viewport" class="view active">
     <div id="swipe-track">
+      <!-- Overview: the boat plan with live navigation/deck lights, the
+           same power diagram the Power page draws, and the tank bars, all
+           laid into the empty wedge left of the rig. Gated behind Signal K
+           alongside Power (see SIGNALK_GATED) -- the diagram and the
+           cabin/fridge readings have no other source.
+           Artwork is the builder's line drawing from the design sketch,
+           minus its 8x5px window decal (a clipPath + base64 <image> worth
+           4KB and invisible at this scale). -->
+      <section id="view-overview" class="pane">
+        <div class="ov-wrap">
+          <div class="ov-col">
+            <div id="ov-power">loading&hellip;</div>
+            <div class="ov-tanks">
+              <div class="gauge">
+                <div class="gauge-label">Freshwater</div>
+                <div class="gauge-bar"><div class="gauge-fill" id="ov-gauge-fresh" style="width:0%"></div></div>
+                <div class="gauge-scale">
+                  <span id="ov-value-fresh">&mdash;</span>
+                  <span class="gauge-max" id="ov-max-fresh"></span>
+                </div>
+              </div>
+              <div class="gauge">
+                <div class="gauge-label">Blackwater</div>
+                <div class="gauge-bar"><div class="gauge-fill" id="ov-gauge-black" style="width:0%"></div></div>
+                <div class="gauge-scale">
+                  <span id="ov-value-black">&mdash;</span>
+                  <span class="gauge-max" id="ov-max-black"></span>
+                </div>
+              </div>
+            </div>
+          </div>
+
+          <div class="ov-boat">
+            <svg id="ov-boat-svg" viewBox="90 80 440 605" xmlns="http://www.w3.org/2000/svg">
+              <defs>
+                <radialGradient id="ovSteamBeam" cx="324" cy="314" r="100" gradientUnits="userSpaceOnUse">
+                  <stop offset="0%" stop-color="#FDF6E3" stop-opacity="0.55"/>
+                  <stop offset="100%" stop-color="#FDF6E3" stop-opacity="0"/>
+                </radialGradient>
+                <radialGradient id="ovDeckBeam" cx="324" cy="314" r="130" gradientUnits="userSpaceOnUse">
+                  <stop offset="0%" stop-color="#FDF6E3" stop-opacity="0.55"/>
+                  <stop offset="100%" stop-color="#FDF6E3" stop-opacity="0"/>
+                </radialGradient>
+                <radialGradient id="ovSternBeam" cx="109" cy="570" r="80" gradientUnits="userSpaceOnUse">
+                  <stop offset="0%" stop-color="#FDF6E3" stop-opacity="0.55"/>
+                  <stop offset="100%" stop-color="#FDF6E3" stop-opacity="0"/>
+                </radialGradient>
+                <radialGradient id="ovPortGlowGrad" cx="417" cy="553" r="26" gradientUnits="userSpaceOnUse">
+                  <stop offset="0%" stop-color="#E24B42" stop-opacity="0.75"/>
+                  <stop offset="100%" stop-color="#E24B42" stop-opacity="0"/>
+                </radialGradient>
+              </defs>
+
+              <!-- Port light glow is drawn UNDER the hull so the hull occludes
+                   it and it only spills above the sheerline. -->
+              <circle id="ovPortGlow" class="ov-glow" cx="417" cy="553" r="26" fill="url(#ovPortGlowGrad)"/>
+
+              <g class="ov-hull">
+                <path fill="#FFFFFF" stroke="#000000" stroke-width="0.2835" stroke-miterlimit="10" d="M447.71,571
+                  c-0.01,0.04-2.38,39.33-2.49,40.28c-0.41,3.76-1.38,5.83-4.97,7.29H115.01c-2.59-0.65-4.85-1.23-5.98-1.57
+                  c-3.78-1.16-6.87-1.44-6.09-8.01c0.48-4,2.44-15.87,5.97-25.58c1.06-3.101,1.03-3.82,5.5-3.84c1.35-0.011,11.99-0.221,27.51-0.54
+                  h0.15c50.96-1.04,154.13-3.23,154.13-3.23C295.8,576.02,447.71,571,447.71,571z"/>
+                <path fill="#2B348F" stroke="#000000" stroke-width="0.2835" stroke-miterlimit="10" d="M440.25,618.57
+                  c-0.07,0.029-0.15,0.06-0.22,0.09c-17.641,6.84-55.511,12.13-76.221,14.09c-2.31,0.22-45.64,3.77-66.02,4.46
+                  c-39.59,1.35-63.57-0.11-76.35-0.59c-19.71-0.72-20.98-1.75-44.16-4.96c-18.28-2.54-48.65-9.84-48.65-9.84s-7.69-1.78-13.62-3.25
+                  H440.25z"/>
+                <path fill="#FFFFFF" stroke="#000000" stroke-width="0.2835" stroke-miterlimit="10" d="M447.71,571c0,0-151.91,5.02-151.51,4.8
+                  c0,0-103.17,2.19-154.13,3.23l208.47-7.05c0,0,25.41-0.311,26.1-1.19L447.71,571z"/>
+                <path fill="#FFFFFF" stroke="#000000" stroke-width="0.2835" stroke-miterlimit="10" d="M376.64,570.79
+                  c-0.689,0.88-26.1,1.19-26.1,1.19l-208.47,7.05h-0.15c2.04,0,6-8.511,7.82-8.83c1.35-0.24,56.84-4.59,57.43-4.75
+                  c1-0.26,3.71-3.48,4.82-5.25c0.57-0.92,47.39-1.42,47.39-1.42s66.71,0.13,74.93,2.38c2.431,0.66,29.4,2.38,30.69,2.62
+                  c1.44,0.27,4.8,0.189,8.1,2.75C374.5,567.61,376.64,570.79,376.64,570.79z"/>
+                <path d="M342.99,570.874l-60.875,1.25l-79.252,2.5l-9.354-5.208l-39.75,2.917c0,0-1.354-0.459,0.125-0.979
+                  s50.938-4.229,50.938-4.229l47.667-1.771l38.313-0.167c0,0,47.438,1.042,47.522,1.625c0,0,1.322,0.688,2.539,1.745
+                  C342.037,569.574,342.99,570.874,342.99,570.874z"/>
+                <rect x="111.875" y="609.875" fill="#002D61" width="328.875" height="1.75"/>
+                <rect x="111.875" y="612.625" fill="#002D61" width="328.875" height="0.891"/>
+                <line fill="none" stroke="#7E91E0" stroke-width="0.2835" stroke-miterlimit="10" x1="466.88" y1="618.57" x2="440.25" y2="618.57"/>
+                <line fill="none" stroke="#7E91E0" stroke-width="0.2835" stroke-miterlimit="10" x1="115.01" y1="618.57" x2="98.38" y2="618.57"/>
+                <path fill="#FFFFFF" stroke="#000000" stroke-width="0.2835" stroke-miterlimit="10" d="M376.643,570.794
+                  c0,0,69.59-1.044,71.067,0.206"/>
+                <polyline fill="#002D61" points="119.167,589.438 120.417,586.767 433.376,580.975 433.376,581.558 119.167,589.438 "/>
+                <rect x="161.305" y="584.863" stroke="#FFFFFF" stroke-width="1.4173" stroke-miterlimit="10" width="23.625" height="7.609"/>
+                <path fill="#FFFFFF" stroke="#000000" stroke-width="0.2835" stroke-miterlimit="10" d="M297.411,580.125
+                  c0,0.621-0.503,1.124-1.124,1.124l0,0c-0.621,0-1.125-0.503-1.125-1.124v-4.596c0-0.621,0.503-1.124,1.125-1.124l0,0
+                  c0.621,0,1.124,0.503,1.124,1.124V580.125z"/>
+                <path fill="#2B348F" stroke="#000000" stroke-width="0.2835" stroke-miterlimit="10" d="M247.798,673.152
+                  c0,0,61.358,0.243,61.483,0.16s4.976-0.952,6.435-8.285c1.457-7.333,6.103-29.123,6.103-29.123l-45.201,1.8
+                  c0,0-2.423,13.447-3.569,18.115c-0.357,1.455-1.525,4.692-3.541,4.833c-6.584,0.459-11.749,3.384-16.169,6.038
+                  C251.514,667.786,247.382,671.943,247.798,673.152z"/>
+                <path id="ovRudder" fill="#2B348F" stroke="#000000" stroke-width="0.2835" stroke-miterlimit="10" d="M131.368,622.886l-18.359-3.563
+                  c0,0-4.184,23.041-4.969,30.915c-0.532,5.339-1.239,19.646,0.656,21.382c0.781,0.716,2.387,0.597,2.387,0.597
+                  s3.672,0.017,4.896,0.021c0.938,0.004,3.033-1.446,4.346-4.796C121.637,664.091,129.118,634.704,131.368,622.886"/>
+                <path fill="none" stroke="#000000" stroke-width="0.9921" stroke-miterlimit="10" d="M435.917,571.389l2.187-10.27l1.646-7.807
+                  c0,0,0.438-2.875-2.125-2.875s-19.125-0.313-19.125-0.313s-2.063-0.125-2.813,3.25s-4.69,18.831-4.69,18.831"/>
+                <path fill="none" stroke="#000000" stroke-width="0.9921" stroke-miterlimit="10" d="M434.426,570.356l2.204-9.084l1.659-6.906
+                  c0,0,0.44-2.543-2.142-2.543c-2.583,0-19.276-0.276-19.276-0.276s-2.079-0.11-2.835,2.875s-4.526,15.964-4.526,15.964"/>
+                <line fill="none" stroke="#000000" stroke-width="0.9921" stroke-miterlimit="10" x1="438.317" y1="561.001" x2="414.253" y2="561.001"/>
+                <line fill="none" stroke="#000000" stroke-width="0.9921" stroke-miterlimit="10" x1="436.136" y1="562.958" x2="411.461" y2="563.622"/>
+                <path fill="none" stroke="#000000" stroke-width="0.9921" stroke-miterlimit="10" d="M112.129,579.693l-3.587-19.401
+                  c0,0-0.792-2.671,1.583-2.791c3.169-0.16,23.167-1.292,23.167-1.292s2.292-0.48,3.667,2.572s6.333,15.843,6.333,15.843v4.381"/>
+                <line fill="none" stroke="#000000" stroke-width="0.9921" stroke-miterlimit="10" x1="115.918" y1="579.548" x2="114.875" y2="557.621"/>
+                <path fill="none" stroke="#000000" stroke-width="0.9921" stroke-miterlimit="10" d="M110.333,568.906c0,0,1.292-0.303,5.25,0
+                  s25.179-0.751,25.179-0.751"/>
+                <polygon fill="#D1D5DB" stroke="#000000" stroke-width="0.2835" stroke-miterlimit="10" points="317.84,553.81 313.7,552.67
+                  272.77,530.14 267.36,526.46 273.59,528.64 314.52,551.18 "/>
+                <polygon fill="#D1D5DB" stroke="#000000" stroke-width="0.2835" stroke-miterlimit="10" points="319.771,524.438 315.097,526.463
+                  168.93,526.463 168.875,522.24 314.742,522.24 "/>
+                <polyline fill="#D1D5DB" stroke="#000000" stroke-width="0.2835" stroke-miterlimit="10" points="317.896,559.782 313.917,96.083
+                  304.708,92.156 304.708,90.128 320,92.938 324.104,560.088 "/>
+                <line fill="none" stroke="#000000" stroke-width="2.126" stroke-miterlimit="10" x1="320.693" y1="420.42" x2="294.72" y2="417.12"/>
+                <line fill="none" stroke="#000000" stroke-width="2.126" stroke-miterlimit="10" x1="318.84" y1="283.68" x2="298.8" y2="277.32"/>
+                <line fill="none" stroke="#000000" stroke-width="0.2835" stroke-miterlimit="10" x1="318.6" y1="285.6" x2="294.72" y2="417.12"/>
+                <line fill="none" stroke="#000000" stroke-width="0.2835" stroke-miterlimit="10" x1="316.56" y1="137.16" x2="298.8" y2="277.32"/>
+                <line fill="none" stroke="#000000" stroke-width="0.2835" stroke-miterlimit="10" x1="298.8" y1="277.32" x2="294.72" y2="417.12"/>
+                <line fill="none" stroke="#000000" stroke-width="0.2835" stroke-miterlimit="10" x1="294.72" y1="417.12" x2="296.287" y2="574.405"/>
+                <line fill="none" stroke="#000000" stroke-width="0.2835" stroke-miterlimit="10" x1="320.121" y1="423.287" x2="296.287" y2="574.405"/>
+                <line fill="none" stroke="#000000" stroke-width="0.7087" stroke-miterlimit="10" x1="447.71" y1="571" x2="320.76" y2="137.76"/>
+                <rect x="440.229" y="556.368" transform="matrix(0.9613 -0.2757 0.2757 0.9613 -136.7364 144.0431)" fill="#FFFFFF" stroke="#000000" stroke-width="0.2835" stroke-miterlimit="10" width="7.588" height="4.108"/>
+                <line fill="none" stroke="#000000" stroke-width="0.2835" stroke-miterlimit="10" x1="118.585" y1="579.499" x2="304.708" y2="92.156"/>
+                <line fill="none" stroke="#000000" stroke-width="0.2835" stroke-miterlimit="10" x1="168.875" y1="522.24" x2="305.667" y2="91.333"/>
+              </g>
+
+              <!-- Dimensions, CAD-drawing style -->
+              <g stroke="#B8C4CC" stroke-width="1">
+                <line x1="313" y1="91" x2="478" y2="91"/>
+                <line x1="313" y1="617" x2="478" y2="617"/>
+                <line x1="313" y1="673" x2="478" y2="673"/>
+                <line x1="478" y1="101" x2="478" y2="607"/>
+                <path d="M478,91 L473,101 L483,101 Z" fill="#B8C4CC" stroke="none"/>
+                <path d="M478,617 L473,607 L483,607 Z" fill="#B8C4CC" stroke="none"/>
+                <line x1="478" y1="627" x2="478" y2="663"/>
+                <path d="M478,617 L473,627 L483,627 Z" fill="#B8C4CC" stroke="none"/>
+                <path d="M478,673 L473,663 L483,663 Z" fill="#B8C4CC" stroke="none"/>
+              </g>
+              <text x="498" y="354" transform="rotate(-90,498,354)" text-anchor="middle" font-size="19" font-weight="bold" fill="#E9EDE7" stroke="#061826" stroke-width="3.5" paint-order="stroke">15 m</text>
+              <text x="498" y="645" transform="rotate(-90,498,645)" text-anchor="middle" font-size="18" font-weight="bold" fill="#E9EDE7" stroke="#061826" stroke-width="3.5" paint-order="stroke">1.58 m</text>
+
+              <!-- Lights. Each group's data-light key maps to circuits in
+                   OVERVIEW_LIGHTS; state comes from /status, never from a
+                   local toggle, so panel button presses stay in sync. -->
+              <g id="ov-lights" font-size="11" font-weight="bold">
+                <!-- anchor: white, 360 all-round, masthead -->
+                <g class="ov-light" data-light="anchor" data-color="#FDF6E3">
+                  <circle cx="317" cy="91" r="32" fill="transparent"/>
+                  <circle class="ov-glow" cx="317" cy="91" r="30" fill="#FDF6E3" fill-opacity="0.28"/>
+                  <circle class="ov-dot" cx="317" cy="91" r="6.5" fill="#4A4A3E" stroke="#C99A4B" stroke-width="1.5"/>
+                  <text x="330" y="95" fill="#FDF6E3" stroke="#000000" stroke-width="2.5" paint-order="stroke">anchor</text>
+                </g>
+
+                <!-- steaming: forward beam -->
+                <g class="ov-light" data-light="steam" data-color="#FDF6E3">
+                  <path d="M342.7,302.3 L408.8,261.0 A100,100 0 0,1 408.8,367.0 L342.7,325.7 A22,22 0 0,0 342.7,302.3 Z" fill="transparent"/>
+                  <path class="ov-glow" d="M324,314 L408.8,261.0 A100,100 0 0,1 408.8,367.0 Z" fill="url(#ovSteamBeam)"/>
+                  <text x="337" y="311" fill="#FDF6E3" stroke="#000000" stroke-width="2.5" paint-order="stroke">steaming</text>
+                </g>
+
+                <!-- deck: downward floodlight beam -->
+                <g class="ov-light" data-light="deck" data-color="#FDF6E3">
+                  <path d="M342.7,325.7 L434.2,382.9 A130,130 0 0,1 328.5,443.9 L324.8,336.0 A22,22 0 0,0 342.7,325.7 Z" fill="transparent"/>
+                  <path class="ov-glow" d="M324,314 L434.2,382.9 A130,130 0 0,1 328.5,443.9 Z" fill="url(#ovDeckBeam)"/>
+                  <text x="337" y="326" fill="#FDF6E3" stroke="#000000" stroke-width="2.5" paint-order="stroke" font-size="9">deck</text>
+                </g>
+
+                <!-- shared fixture housing for steam+deck -->
+                <circle id="ovFixtureSteamDeck" cx="324" cy="314" r="4.5" fill="#4A4A3E" stroke="#C99A4B" stroke-width="1.5"/>
+
+                <!-- port: red, bow. Its glow is #ovPortGlow, drawn under the hull. -->
+                <g class="ov-light" data-light="port" data-color="#E24B42" data-external-glow="ovPortGlow">
+                  <circle cx="417" cy="553" r="16" fill="transparent"/>
+                </g>
+
+                <!-- starboard: green, bow -->
+                <g class="ov-light" data-light="stbd" data-color="#3FBF74">
+                  <circle cx="417" cy="571" r="16" fill="transparent"/>
+                  <circle class="ov-glow" cx="417" cy="571" r="14" fill="#3FBF74" fill-opacity="0.3"/>
+                  <circle class="ov-dot" cx="417" cy="571" r="4.5" fill="#1a5c34" stroke="#1a5c34" stroke-width="1.5"/>
+                </g>
+
+                <!-- stern: white, facing aft -->
+                <g class="ov-light" data-light="stern" data-color="#FDF6E3">
+                  <path d="M109,570 L39.7,610.0 A80,80 0 0,1 39.7,530.0 Z" fill="transparent"/>
+                  <path class="ov-glow" d="M109,570 L39.7,610.0 A80,80 0 0,1 39.7,530.0 Z" fill="url(#ovSternBeam)"/>
+                  <circle class="ov-dot" cx="109" cy="570" r="4.5" fill="#4A4A3E" stroke="#C99A4B" stroke-width="1.5"/>
+                </g>
+              </g>
+
+              <!-- Interior readings, painted inside the white hull like
+                   labels on a deck plan. Each group is hidden outright when
+                   its sensor has no value, rather than showing a dash. -->
+              <g id="ov-cabin" display="none">
+                <text x="320" y="583" text-anchor="middle" font-size="11" font-weight="bold" fill="#000000">CABIN</text>
+                <text id="ov-cabin-value" x="320" y="600" text-anchor="middle" font-size="13" font-weight="bold" fill="#000000"></text>
+              </g>
+              <g id="ov-fridge" display="none">
+                <rect x="185" y="571" width="78" height="38" rx="6" fill="#06202f" opacity="0.92" stroke="var(--cold)" stroke-opacity="0.65" stroke-width="1"/>
+                <g class="ov-fridge-icon" transform="translate(203,590)" stroke-width="1.8" fill="none" stroke-linecap="round">
+                  <line x1="0" y1="-9" x2="0" y2="9"/>
+                  <line x1="-7.8" y1="-4.5" x2="7.8" y2="4.5"/>
+                  <line x1="-7.8" y1="4.5" x2="7.8" y2="-4.5"/>
+                  <line x1="0" y1="-9" x2="-3" y2="-6"/>
+                  <line x1="0" y1="-9" x2="3" y2="-6"/>
+                  <line x1="0" y1="9" x2="-3" y2="6"/>
+                  <line x1="0" y1="9" x2="3" y2="6"/>
+                </g>
+                <text id="ov-fridge-value" class="ov-fridge-value" x="235" y="595" text-anchor="middle" font-size="13" font-weight="bold"></text>
+              </g>
+            </svg>
+          </div>
+        </div>
+      </section>
+
       <section id="view-essentials" class="pane">
         <p id="essentials-state">state: loading&hellip;</p>
         <div class="control-layout">
@@ -548,34 +833,60 @@
     }
     let signalkEnabled = !!loadCachedSignalkUrl();
 
-    const ALL_SWIPE_VIEWS = ['essentials', 'control', 'sensors', 'power', 'config'];
-    const VIEW_LABELS = { essentials: 'Essentials', control: 'All Controls', sensors: 'Sensors', power: 'Power', config: 'Settings' };
+    const ALL_SWIPE_VIEWS = ['overview', 'essentials', 'control', 'sensors', 'power', 'config'];
+    const VIEW_LABELS = { overview: 'Overview', essentials: 'Essentials', control: 'All Controls', sensors: 'Sensors', power: 'Power', config: 'Settings' };
+    // Pages with nothing to show without a Signal K source. Power's diagram
+    // and Overview's copy of it both need electrical.solar/.batteries, and
+    // Overview's cabin/fridge readings need environment.* -- none of which
+    // the gateway's own CAN data provides.
+    const SIGNALK_GATED = ['overview', 'power'];
     const swipeViewport = document.getElementById('swipe-viewport');
     const swipeTrack = document.getElementById('swipe-track');
-    const powerPane = document.getElementById('view-power');
-    const configPane = document.getElementById('view-config');
     const navLabel = document.getElementById('nav-label');
     const navPrev = document.getElementById('nav-prev');
     const navNext = document.getElementById('nav-next');
+    const PANE_EL = {};
+    ALL_SWIPE_VIEWS.forEach(name => { PANE_EL[name] = document.getElementById(`view-${name}`); });
 
     function computeSwipeViews() {
-      return ALL_SWIPE_VIEWS.filter(v => v !== 'power' || signalkEnabled);
+      return ALL_SWIPE_VIEWS.filter(v => SIGNALK_GATED.indexOf(v) === -1 || signalkEnabled);
     }
     // Keeps swipeTrack's actual DOM children (which setSwipeIndex/
     // currentPageRoot index into directly) and the --swipe-pages width var
     // in lockstep with SWIPE_VIEWS -- must run every time signalkEnabled
-    // changes, never SWIPE_VIEWS alone.
-    function syncPowerPaneDOM() {
-      if (signalkEnabled && powerPane.parentElement !== swipeTrack) {
-        swipeTrack.insertBefore(powerPane, configPane);
-      } else if (!signalkEnabled && powerPane.parentElement === swipeTrack) {
-        powerPane.remove();
+    // changes, never SWIPE_VIEWS alone. Re-inserts at the right index by
+    // finding the next gated-in pane in ALL_SWIPE_VIEWS order, so the
+    // carousel order survives any number of panes coming and going.
+    function syncGatedPanesDOM() {
+      for (let i = 0; i < ALL_SWIPE_VIEWS.length; i++) {
+        const name = ALL_SWIPE_VIEWS[i];
+        if (SIGNALK_GATED.indexOf(name) === -1) continue;
+        const pane = PANE_EL[name];
+        if (signalkEnabled && pane.parentElement !== swipeTrack) {
+          let ref = null;
+          for (let j = i + 1; j < ALL_SWIPE_VIEWS.length && !ref; j++) {
+            const cand = PANE_EL[ALL_SWIPE_VIEWS[j]];
+            if (cand && cand.parentElement === swipeTrack) ref = cand;
+          }
+          swipeTrack.insertBefore(pane, ref);
+        } else if (!signalkEnabled && pane.parentElement === swipeTrack) {
+          pane.remove();
+        }
       }
       document.documentElement.style.setProperty('--swipe-pages', SWIPE_VIEWS.length);
     }
 
     let SWIPE_VIEWS = computeSwipeViews();
-    syncPowerPaneDOM();
+    syncGatedPanesDOM();
+
+    // The Overview's masthead rises into the nav bar, which needs the bar's
+    // real height (it follows the arrow font size, which the 360px media
+    // query changes) -- measured, not hardcoded. See the .ov-boat CSS.
+    const navEl = document.querySelector('nav');
+    function syncNavHeight() {
+      document.documentElement.style.setProperty('--nav-h', `${navEl.offsetHeight}px`);
+    }
+    syncNavHeight();
 
     // Called whenever signalkEnabled changes after the initial page load
     // (checkbox toggle, Save, or a server-side config value getting adopted)
@@ -583,10 +894,10 @@
     // currently on screen, since the carousel's layout just shifted under it.
     function updateSwipeViews() {
       SWIPE_VIEWS = computeSwipeViews();
-      syncPowerPaneDOM();
+      syncGatedPanesDOM();
       const current = location.hash.slice(1) || 'essentials';
-      if (current === 'power' && !signalkEnabled) {
-        location.hash = 'essentials'; // hashchange -> showView; power just vanished from under the viewer
+      if (SIGNALK_GATED.indexOf(current) !== -1 && !signalkEnabled) {
+        location.hash = 'essentials'; // hashchange -> showView; the page just vanished from under the viewer
       } else {
         showView(current);
       }
@@ -678,7 +989,7 @@
     // A remembered main-page name might not be valid right now even though
     // it once was -- e.g. "power" while Signal K is currently disabled, in
     // which case its DOM node isn't even attached to the document (see
-    // syncPowerPaneDOM()). Sub-view names (diagnostics/relays/etc.) aren't
+    // syncGatedPanesDOM()). Sub-view names (diagnostics/relays/etc.) aren't
     // gated by anything, so they're always accepted as-is.
     function isValidView(name) {
       if (SWIPE_VIEWS.includes(name)) return true;
@@ -687,8 +998,22 @@
     }
 
     function showView(name) {
+      // A gated page's pane is detached from the document while Signal K is
+      // off (syncGatedPanesDOM), so a hash pointing at one -- a deep link, or
+      // a device whose localStorage was cleared, since signalkEnabled starts
+      // false until seedConfigFromServer() adopts the server's URL -- would
+      // otherwise hit getElementById(...) === null below and take the whole
+      // script down with it. Fall back until it becomes available; the later
+      // updateSwipeViews() re-runs showView() with the hash still intact.
+      if (!isValidView(name)) name = 'essentials';
       rememberView(name);
       if (TANK_GAUGE_MOUNTS[name]) moveTankGaugeTo(TANK_GAUGE_MOUNTS[name]);
+      // Both before setSwipeIndex(): the body class shifts the viewport up
+      // behind the nav, and syncOverviewLayout() sizes the boat -- either
+      // one after the fact would leave syncSwipeHeight() measuring a pane
+      // that's about to change height.
+      document.body.classList.toggle('overview-active', name === 'overview');
+      if (name === 'overview') syncOverviewLayout();
       const isMain = SWIPE_VIEWS.includes(name);
       const wasMainActive = swipeViewport.classList.contains('active');
       document.querySelectorAll('.view').forEach(el => el.classList.remove('active'));
@@ -729,7 +1054,77 @@
     // autopilot pane -- which changes the active pane's height without any
     // of our render functions running, so the swipe track needs its own
     // resync hook here.
-    window.addEventListener('resize', syncActiveSwipeHeight);
+    function resyncLayout() {
+      syncNavHeight();
+      syncOverviewLayout();
+      syncActiveSwipeHeight();
+    }
+    window.addEventListener('resize', resyncLayout);
+    // Also on load: the Overview is sized from window.innerHeight, and a
+    // viewport that isn't settled when the inline script runs (seen with the
+    // dev preview's iframes; possible on the MFD if the app is laid out
+    // before its pane is final) would leave the boat sized to a stale height
+    // with no resize event to correct it.
+    window.addEventListener('load', resyncLayout);
+
+    // -- Overview sizing. This Chromium can't derive an <svg>'s height from
+    // its viewBox plus a width, so both dimensions are set explicitly here
+    // rather than in CSS.
+    //
+    // Full pane, wedge layout: the boat runs the height of the viewport
+    // (it starts level with the top of the nav, which it overlaps, and
+    // stops a pane-padding short of the bottom), leaving the upper-left
+    // wedge beside the rig for the power diagram and tank bars. Capped at
+    // 62% of the pane so the column keeps a usable width when the
+    // autopilot pane is expanded (642px -> ~236px of column).
+    // Stacked layout (<620px): boat full width, everything below it, body
+    // scrolls.
+    const BOAT_ASPECT = 440 / 605; // .ov-boat svg viewBox width/height
+    const OV_DIAGRAM_ASPECT = 400 / 300; // shared power-diagram viewBox
+    const OV_MIN_COL = 300; // px of data column to protect before shrinking the boat
+    function syncOverviewLayout() {
+      const boat = document.getElementById('ov-boat-svg');
+      if (!boat) return; // pane detached from the document -- Signal K is off
+      const wrap = boat.closest('.ov-wrap');
+      const avail = wrap.clientWidth || window.innerWidth;
+      const stacked = window.innerWidth < 620;
+      let w, h;
+      if (stacked) {
+        w = avail;
+        h = w / BOAT_ASPECT;
+      } else {
+        h = Math.max(240, window.innerHeight - 32);
+        w = h * BOAT_ASPECT;
+        // Reserve a usable column rather than capping the boat at a fraction
+        // of the pane: the boat's aspect ratio means its height buys width
+        // directly out of the column, and below ~300px the diagram's labels
+        // stop being readable. The data is the point of the page; the boat is
+        // context, so it yields first.
+        const maxW = Math.max(200, avail - OV_MIN_COL - 12);
+        if (w > maxW) { w = maxW; h = w / BOAT_ASPECT; }
+      }
+      boat.style.width = `${Math.round(w)}px`;
+      boat.style.height = `${Math.round(h)}px`;
+      // The boat is pulled up by --nav-h to overlap the header, so it sticks
+      // out of the flex line by that much at the top and its real extent is
+      // (h - navH) below the pane's top edge. syncSwipeHeight() sizes the
+      // clipping viewport from the pane, so the pane has to be told to
+      // account for it -- otherwise a boat taller than the data column gets
+      // its keel clipped off.
+      // On .ov-wrap, not the pane: panes are border-box, so a min-height
+      // there would have the pane's own 16px padding eaten out of it and the
+      // keel would still lose that much.
+      const navH = navEl.offsetHeight;
+      wrap.style.minHeight = stacked ? '' : `${Math.round(h - navH)}px`;
+
+      const diagram = document.getElementById('ov-diagram');
+      if (diagram) {
+        const colW = stacked ? avail : Math.max(160, avail - w - 12);
+        const dw = Math.min(colW, 460);
+        diagram.style.width = `${Math.round(dw)}px`;
+        diagram.style.height = `${Math.round(dw / OV_DIAGRAM_ASPECT)}px`;
+      }
+    }
 
     // -- swipe left/right between the main pages, like the Victron app's
     // swipeable panes -- shares stepView() with the arrow buttons, so both
@@ -1248,8 +1643,60 @@
       container.appendChild(makeCircuitButton('Cockpit outlet', c.F5.state, () => setCircuit('F5', !c.F5.state)));
     }
 
+    // -- Overview lights: the same circuits Essentials drives, operated from
+    // the boat plan instead of buttons. State always comes from /status,
+    // never from a local toggle, so a press on the boat's own panel keeps
+    // the picture honest. Bow and stern are one group, exactly as
+    // Essentials' "Navigation lights" button treats them (setNavigationLights).
+    const OVERVIEW_LIGHTS = [
+      { key: 'anchor', circuits: ['LANTERN_MASTHEAD'], dim: '#4A4A3E' },
+      { key: 'steam', circuits: ['LANTERN_STEAM'], dim: '#4A4A3E' },
+      { key: 'deck', circuits: ['DECK_LIGHT'], dim: '#4A4A3E' },
+      { key: 'port', circuits: ['LANTERN_BOW', 'LANTERN_AFT'], dim: null },
+      { key: 'stbd', circuits: ['LANTERN_BOW', 'LANTERN_AFT'], dim: '#1a5c34' },
+      { key: 'stern', circuits: ['LANTERN_BOW', 'LANTERN_AFT'], dim: '#4A4A3E' },
+    ];
+
+    function overviewLightOn(switches, circuits) {
+      return circuits.every(name => switches[name] && switches[name].state);
+    }
+
+    function renderOverviewLights(status) {
+      const switches = status.electrical.switches;
+      let steamOrDeckOn = false;
+      for (const light of OVERVIEW_LIGHTS) {
+        const g = PANE_EL.overview.querySelector(`.ov-light[data-light="${light.key}"]`);
+        if (!g) continue;
+        const on = overviewLightOn(switches, light.circuits);
+        if (light.key === 'steam' || light.key === 'deck') steamOrDeckOn = steamOrDeckOn || on;
+        // The port light's glow lives outside its group, drawn under the
+        // hull so the hull occludes it -- hence data-external-glow.
+        const glowId = g.dataset.externalGlow;
+        const glow = glowId ? PANE_EL.overview.querySelector(`#${glowId}`) : g.querySelector('.ov-glow');
+        if (glow) glow.style.opacity = on ? '1' : '0';
+        const dot = g.querySelector('.ov-dot');
+        if (dot) dot.setAttribute('fill', on ? g.dataset.color : light.dim);
+      }
+      const fixture = PANE_EL.overview.querySelector('#ovFixtureSteamDeck');
+      if (fixture) fixture.setAttribute('fill', steamOrDeckOn ? '#FDF6E3' : '#4A4A3E');
+    }
+
+    // Delegated from the pane, not bound per light: syncGatedPanesDOM()
+    // detaches and re-attaches this whole section as Signal K is toggled,
+    // and the pane element itself is the one node that survives that.
+    PANE_EL.overview.addEventListener('click', (evt) => {
+      const g = evt.target.closest('.ov-light');
+      if (!g || !lastStatus) return;
+      const light = OVERVIEW_LIGHTS.find(l => l.key === g.dataset.light);
+      if (!light) return;
+      const on = overviewLightOn(lastStatus.electrical.switches, light.circuits);
+      if (light.circuits.length > 1) setNavigationLights(!on);
+      else setCircuit(light.circuits[0], !on);
+    });
+
     function renderControl(status) {
       lastStatus = status;
+      renderOverviewLights(status);
 
       const summary = `state: ${status.state} | streaming: ${status.streaming}`;
       const hasIssue = status.state !== 'OPERATIONAL' || !status.streaming;
@@ -1448,6 +1895,7 @@
         statusEl.textContent = 'saved locally (server unreachable)';
       }
       fetchElectricalSnapshot();
+      fetchEnvironmentSnapshot();
     }
 
     // Tests whatever's currently entered -- not necessarily saved yet --
@@ -1498,13 +1946,35 @@
     // Every page with a tank gauge also has its own freshwater/blackwater
     // text+bar elements under this id prefix (cheap plain divs, unlike the
     // <svg> above -- no benefit to sharing those across pages too).
-    const TANK_TEXT_ID_PREFIXES = ['sb-', 'es-', 'sn-', 'tv-'];
+    const TANK_TEXT_ID_PREFIXES = ['sb-', 'es-', 'sn-', 'tv-', 'ov-'];
 
-    function updateTankTextPanel(idPrefix, freshRangeText, blackLevel, blackLiters) {
-      document.getElementById(`${idPrefix}value-fresh`).textContent = freshRangeText;
+    // A tank's full capacity, from the 100% row of the calibration table --
+    // the same source tankLiters() reads. Falls back to "100%" when that
+    // level hasn't been measured yet, matching how the level itself degrades
+    // from liters to a percentage.
+    function tankMaxText(tank) {
+      const raw = document.getElementById(`cal-${tank}-100`).value;
+      return raw === '' ? '100%' : `${parseFloat(raw)} L`;
+    }
+
+    function setTankMax(elId, tank) {
+      const el = document.getElementById(elId);
+      if (el) el.textContent = tankMaxText(tank); // only Overview has these
+    }
+
+    function updateTankTextPanel(idPrefix, freshLevel, freshRangeText, blackLevel, blackLiters) {
+      const freshValue = document.getElementById(`${idPrefix}value-fresh`);
+      if (!freshValue) return; // Overview's pane is detached while Signal K is off
+      freshValue.textContent = freshRangeText;
+      // Overview is the only page showing freshwater as a bar -- the others
+      // use the shared cylinder gauge, driven by setTankCylinderLevel().
+      const freshBar = document.getElementById(`${idPrefix}gauge-fresh`);
+      if (freshBar) freshBar.style.width = `${freshLevel * 100}%`;
       document.getElementById(`${idPrefix}gauge-black`).style.width = `${blackLevel * 100}%`;
       document.getElementById(`${idPrefix}value-black`).textContent =
         blackLiters !== null ? `${blackLiters} L` : `${Math.round(blackLevel * 100)}%`;
+      setTankMax(`${idPrefix}max-fresh`, 'freshwater');
+      setTankMax(`${idPrefix}max-black`, 'blackwater');
     }
 
     function updateBatteryRow(idPrefix, starterVoltage, houseVoltage) {
@@ -1521,7 +1991,7 @@
       setTankCylinderLevel(freshPct);
       updateTankCylinderLabels('freshwater');
       for (const idPrefix of TANK_TEXT_ID_PREFIXES) {
-        updateTankTextPanel(idPrefix, freshRangeText, blackLevel, blackLiters);
+        updateTankTextPanel(idPrefix, freshLevel, freshRangeText, blackLevel, blackLiters);
       }
 
       const starterVoltage = data.electrical.batteries.starter.voltage;
@@ -1567,10 +2037,10 @@
       return { solarKeys, battKey };
     }
 
-    function renderPower(data) {
-      lastElectrical = data;
-      const elec = data.electrical;
-
+    // Derived figures, computed once per update and rendered twice -- the
+    // Power page and the Overview draw the identical diagram, so the maths
+    // lives here rather than in either renderer.
+    function computePowerFigures(elec) {
       const { solarKeys, battKey } = pickElectricalInstances(elec);
       const solarList = solarKeys.map(k => elec.solar[k]);
       const batt = battKey ? elec.batteries[battKey] : null;
@@ -1609,21 +2079,37 @@
       // for electrical.batteries.*.current literally says.
       const battDischarging = battCurrent < -0.5; // negative -- supplying the load's shortfall
       const battCharging = battCurrent > 0.5;     // positive -- absorbing the load's surplus
-      // Arrowhead direction follows the path's own direction. Load is at cy=110 r=40 (bottom at 150),
-      // battery at y=220. Discharging (neg): arrow from battery to load. Charging (pos): arrow from load to battery.
-      const battArrowPath = battDischarging ? 'M 200 220 L 200 150' : 'M 200 150 L 200 220';
-      const battArrowClass = (battDischarging || battCharging) ? 'arrow-active arrow-flowing' : 'arrow-inactive';
 
-      // One box per solar instance -- a single instance (the boat's real
-      // hardware, always exactly one) keeps the original box exactly as it
-      // was; multiple instances stack vertically in the same top-left
-      // region instead of being collapsed into one figure.
-      function solarBoxLayout(count) {
-        if (count <= 1) return [{ x: 20, y: 20, w: 60, h: 50 }];
-        const top = 5, bottom = 95, gap = 8;
-        const h = (bottom - top - gap * (count - 1)) / count;
-        return Array.from({ length: count }, (_, i) => ({ x: 15, w: 65, h, y: top + i * (h + gap) }));
-      }
+      return {
+        solarList, batt, battCurrent, battVoltage, battPower,
+        chargerCurrent, chargerPower, battDischarging, battCharging,
+        solarInstancePower, solarInstanceCurrent,
+        soc: ((batt && batt.capacity && batt.capacity.stateOfCharge && batt.capacity.stateOfCharge.value) || 0) * 100,
+        hoursRemaining: ((batt && batt.capacity && batt.capacity.timeRemaining && batt.capacity.timeRemaining.value) || 0) / 3600,
+      };
+    }
+
+    // One box per solar instance -- a single instance (the boat's real
+    // hardware, always exactly one) keeps the original box exactly as it
+    // was; multiple instances stack vertically in the same top-left
+    // region instead of being collapsed into one figure.
+    function solarBoxLayout(count) {
+      if (count <= 1) return [{ x: 12, y: 20, w: 76, h: 50 }];
+      const top = 5, bottom = 95, gap = 8;
+      const h = (bottom - top - gap * (count - 1)) / count;
+      return Array.from({ length: count }, (_, i) => ({ x: 10, w: 78, h, y: top + i * (h + gap) }));
+    }
+
+    // The diagram, drawn identically by the Power page and the Overview.
+    // `id` scopes the element *and* its arrowhead marker: both render into
+    // the same document, and a duplicate marker id would leave the second
+    // diagram's url(#...) references resolving to the first one's marker.
+    function powerDiagramSvg(f, id) {
+      const marker = `${id}-arrowhead`;
+      const solarList = f.solarList;
+      const solarInstancePower = f.solarInstancePower;
+      const solarInstanceCurrent = f.solarInstanceCurrent;
+      const chargerCurrent = f.chargerCurrent;
       const solarLayout = solarBoxLayout(Math.max(1, solarList.length));
       const solarNodesSvg = (solarList.length ? solarList : [null]).map((s, i) => {
         const L = solarLayout[i];
@@ -1635,51 +2121,74 @@
           <rect x="${L.x}" y="${L.y}" width="${L.w}" height="${L.h}" fill="none" stroke="var(--brass)" stroke-width="2" rx="4"/>
           <text x="${L.x + L.w / 2}" y="${L.y + L.h * 0.35}" class="power-label" fill="var(--text-primary)">${label}</text>
           <text x="${L.x + L.w / 2}" y="${L.y + L.h * 0.85}" class="power-value" fill="var(--text-primary)">${power.toFixed(0)}W</text>
-          <path d="M ${startX} ${startY} Q 140 100 160 110" class="arrow-${current > 0 ? 'active arrow-flowing' : 'inactive'}" fill="none" marker-end="url(#arrowhead)"/>
-          <text x="${startX + 12}" y="${startY + 15}" class="power-value" fill="var(--text-primary)">${current.toFixed(1)}A</text>
+          <path d="M ${startX} ${startY} Q 140 100 160 110" class="arrow-${current > 0 ? 'active arrow-flowing' : 'inactive'}" fill="none" marker-end="url(#${marker})"/>
+          <text x="${startX + 28}" y="${startY + 20}" class="power-value" fill="var(--text-primary)">${current.toFixed(1)}A</text>
         `;
       }).join('');
 
-      // Generate power flow diagram
-      const diagram = `
-        <svg viewBox="0 0 400 300" id="power-diagram">
+      // Arrowhead direction follows the path's own direction. Load is at
+      // cy=110 r=40 (bottom at 150); the battery's terminals top out at 215.
+      // Discharging (neg): arrow from battery to load. Charging (pos): the
+      // reverse.
+      const battArrowPath = f.battDischarging ? 'M 200 215 L 200 152' : 'M 200 152 L 200 213';
+      const battArrowClass = (f.battDischarging || f.battCharging) ? 'arrow-active arrow-flowing' : 'arrow-inactive';
+
+      return `
+        <svg viewBox="0 0 400 300" id="${id}" class="power-diagram">
           <!-- Solar panel(s) (top left) -->
           ${solarNodesSvg}
 
           <!-- Charger (top right) -->
-          <rect x="320" y="20" width="60" height="50" fill="none" stroke="${chargerCurrent > 2 ? 'var(--brass)' : 'var(--text-secondary)'}" stroke-width="2" rx="4"/>
-          <text x="350" y="35" class="power-label" fill="var(--text-primary)">CHARGER/Alternator</text>
-          <text x="350" y="63" class="power-value" fill="var(--text-primary)">${Math.max(0, chargerPower).toFixed(0)}W</text>
+          <rect x="311" y="20" width="78" height="50" fill="none" stroke="${chargerCurrent > 2 ? 'var(--brass)' : 'var(--text-secondary)'}" stroke-width="2" rx="4"/>
+          <text x="350" y="35" class="power-label" fill="var(--text-primary)">CHARGER</text>
+          <text x="350" y="63" class="power-value" fill="var(--text-primary)">${Math.max(0, f.chargerPower).toFixed(0)}W</text>
 
           <!-- Load (center -- the node solar and the charger both feed; no
                wattage shown, it's not a measured value -- see comment above) -->
           <circle cx="200" cy="110" r="40" fill="none" stroke="var(--brass)" stroke-width="3"/>
           <text x="200" y="115" class="power-label" fill="var(--text-primary)">LOAD</text>
 
-          <!-- Battery (bottom -- makes up whatever solar+charger don't cover) -->
-          <rect x="170" y="220" width="60" height="50" fill="none" stroke="var(--brass)" stroke-width="2" rx="4"/>
-          <text x="200" y="235" class="power-label" fill="var(--text-primary)">BATTERY</text>
-          <text x="200" y="263" class="power-value" fill="var(--text-primary)">${(((batt && batt.capacity && batt.capacity.stateOfCharge && batt.capacity.stateOfCharge.value) || 0) * 100).toFixed(0)}%</text>
+          <!-- Battery (bottom -- makes up whatever solar+charger don't
+               cover). Drawn as a battery, body plus terminals, with the
+               state of charge inside it: the shape names the figure, so it
+               needs no BATTERY label of its own. -->
+          <g stroke="var(--brass)" stroke-width="2" fill="none">
+            <rect x="162" y="222" width="76" height="46" rx="4"/>
+            <rect x="178" y="215" width="11" height="7" rx="1.5"/>
+            <rect x="211" y="215" width="11" height="7" rx="1.5"/>
+          </g>
+          <text x="200" y="252" class="power-soc" fill="var(--text-primary)">${f.soc.toFixed(0)}%</text>
 
           <!-- Arrow: Charger → Battery (Charge current) -->
-          <path d="M 320 45 Q 260 130 230 140" class="arrow-${chargerCurrent > 2 ? 'active arrow-flowing' : 'inactive'}" fill="none" marker-end="url(#arrowhead)"/>
+          <path d="M 311 45 Q 260 130 230 140" class="arrow-${chargerCurrent > 2 ? 'active arrow-flowing' : 'inactive'}" fill="none" marker-end="url(#${marker})"/>
           ${chargerCurrent > 2 ? `<text x="280" y="85" class="power-value" fill="var(--text-primary)">Charge</text><text x="280" y="105" class="power-value" fill="var(--text-primary)">${chargerCurrent.toFixed(1)}A</text>` : ''}
 
           <!-- Arrow: Charger → Load (shows charger supplies load power when active) -->
-          <path d="M 320 55 Q 270 80 240 100" class="arrow-${chargerCurrent > 2 ? 'active arrow-flowing' : 'inactive'}" fill="none" marker-end="url(#arrowhead)"/>
+          <path d="M 311 55 Q 270 80 240 100" class="arrow-${chargerCurrent > 2 ? 'active arrow-flowing' : 'inactive'}" fill="none" marker-end="url(#${marker})"/>
           ${chargerCurrent > 2 ? `<text x="275" y="65" class="power-value" fill="var(--text-primary)">Load</text>` : ''}
 
           <!-- Arrow: Battery ↔ Load -- direction flips with which way current is flowing -->
-          <path d="${battArrowPath}" class="${battArrowClass}" fill="none" marker-end="url(#arrowhead)"/>
-          <text x="215" y="190" class="power-value" fill="var(--text-primary)">${Math.abs(battCurrent).toFixed(1)}A</text>
+          <path d="${battArrowPath}" class="${battArrowClass}" fill="none" marker-end="url(#${marker})"/>
+          <text x="215" y="190" class="power-value" fill="var(--text-primary)">${Math.abs(f.battCurrent).toFixed(1)}A</text>
 
           <defs>
-            <marker id="arrowhead" markerWidth="10" markerHeight="10" refX="9" refY="3" orient="auto">
+            <marker id="${marker}" markerWidth="10" markerHeight="10" refX="9" refY="3" orient="auto">
               <polygon points="0 0, 10 3, 0 6" fill="var(--brass)"/>
             </marker>
           </defs>
         </svg>
       `;
+    }
+
+    function renderPower(data) {
+      lastElectrical = data;
+      const f = computePowerFigures(data.electrical);
+      const solarList = f.solarList;
+      const chargerCurrent = f.chargerCurrent;
+      const battCurrent = f.battCurrent;
+      const battVoltage = f.battVoltage;
+      const battPower = f.battPower;
+      const diagram = powerDiagramSvg(f, 'power-diagram');
       // "chargingMode" doesn't exist in Venus's own demo data at all (it
       // uses "operationMode"/"mode" instead) -- was always silently falling
       // back to the em-dash there. operationMode's the more descriptive of
@@ -1696,10 +2205,114 @@
         <div class="battery-row"><span>Voltage</span><span style="color:var(--text-primary)">${battVoltage.toFixed(2)} V</span></div>
         <div class="battery-row"><span>Current (+charging)</span><span style="color:var(--text-primary)">${signed(battCurrent, 2)} A</span></div>
         <div class="battery-row"><span>Power (+charging)</span><span style="color:var(--text-primary)">${signed(battPower, 1)} W</span></div>
-        <div class="battery-row"><span>Time remaining</span><span style="color:var(--text-primary)">${((((batt && batt.capacity && batt.capacity.timeRemaining && batt.capacity.timeRemaining.value) || 0) / 3600).toFixed(1))} h</span></div>
+        <div class="battery-row"><span>Time remaining</span><span style="color:var(--text-primary)">${f.hoursRemaining.toFixed(1)} h</span></div>
       ` : 'No solar charger data available');
-      document.getElementById('power-solar').innerHTML = detailedHtml;
-      document.getElementById('power-battery').innerHTML = '';
+      // Both panes are detached from the document while Signal K is off
+      // (syncGatedPanesDOM), so neither mount is guaranteed to exist.
+      const solarMount = document.getElementById('power-solar');
+      if (solarMount) {
+        solarMount.innerHTML = detailedHtml;
+        document.getElementById('power-battery').innerHTML = '';
+      }
+      renderOverviewPower(f);
+    }
+
+    // The Overview shows the diagram alone -- the per-instance detail rows
+    // stay on the Power page, where there's room for them.
+    function renderOverviewPower(f) {
+      const mount = document.getElementById('ov-power');
+      if (!mount) return;
+      mount.innerHTML = powerDiagramSvg(f, 'ov-diagram');
+      // The <svg> is new every time and carries no intrinsic size (this
+      // Chromium won't derive one from viewBox), so it has to be measured
+      // back in or it renders at the default 300x150. Only while Overview
+      // is actually on screen, though: syncOverviewLayout() reads layout,
+      // and this runs on every electrical delta -- forcing a reflow several
+      // times a second behind another page would be pure waste. showView()
+      // sizes it on the way in.
+      if (document.body.classList.contains('overview-active')) {
+        syncOverviewLayout();
+        syncActiveSwipeHeight(); // stacked layout puts the column above the boat, so this changes the pane's height
+      }
+    }
+
+    // -- Overview interior readings: cabin + fridge, painted inside the
+    // hull. Signal K only -- the gateway has no environment sensors of its
+    // own, which is part of why Overview is gated behind Signal K at all.
+    // A zone with no temperature is hidden outright rather than shown as a
+    // dash: an empty patch of deck reads better than a dead readout.
+    let lastEnvironment = null;
+
+    // Zone lookup deliberately accepts two locations. The standard one is
+    // environment.inside.<zone> -- that's what the Signal K schema's own
+    // examples use (engineRoom / mainCabin / refrigerator), and those names
+    // come straight from the NMEA 2000 TEMPERATURE_SOURCE enum (4 = Main
+    // Cabin, 7 = Refrigeration), so a reading published there also maps
+    // cleanly onto PGN 130316 for the N2K bus. The flat environment.<zone>
+    // is what the BLE plugin published before its config was corrected on
+    // 2026-08-29; kept so the page works either side of that change.
+    // Humidity likewise: relativeHumidity is the schema's field name, plain
+    // humidity was the plugin's off-spec original.
+    const OV_ENV_ZONES = {
+      cabin: ['mainCabin', 'cabin'],
+      fridge: ['refrigerator'],
+    };
+
+    function envZone(env, names) {
+      if (!env) return null;
+      for (const name of names) {
+        if (env.inside && env.inside[name]) return env.inside[name];
+        if (env[name]) return env[name];
+      }
+      return null;
+    }
+
+    function envNumber(zone, fields) {
+      if (!zone) return null;
+      for (const field of fields) {
+        const v = zone[field] && zone[field].value;
+        if (typeof v === 'number') return v;
+      }
+      return null;
+    }
+
+    function renderOverviewEnv(env) {
+      const cabinGroup = document.getElementById('ov-cabin');
+      if (!cabinGroup) return; // pane detached -- Signal K off
+      const cabin = envZone(env, OV_ENV_ZONES.cabin);
+      const cabinT = envNumber(cabin, ['temperature']);
+      const cabinRh = envNumber(cabin, ['relativeHumidity', 'humidity']);
+      if (cabinT === null) {
+        cabinGroup.setAttribute('display', 'none');
+      } else {
+        // Signal K units: temperature in kelvin, humidity as a 0-1 ratio.
+        const parts = [`${(cabinT - 273.15).toFixed(1)}°C`];
+        if (cabinRh !== null) parts.push(`${Math.round(cabinRh * 100)}%`);
+        document.getElementById('ov-cabin-value').textContent = parts.join(' · ');
+        cabinGroup.setAttribute('display', 'inline');
+      }
+
+      const fridgeGroup = document.getElementById('ov-fridge');
+      const fridgeT = envNumber(envZone(env, OV_ENV_ZONES.fridge), ['temperature']);
+      if (fridgeT === null) {
+        fridgeGroup.setAttribute('display', 'none');
+      } else {
+        document.getElementById('ov-fridge-value').textContent = `${(fridgeT - 273.15).toFixed(1)}°C`;
+        fridgeGroup.setAttribute('display', 'inline');
+      }
+    }
+
+    async function fetchEnvironmentSnapshot() {
+      try {
+        const resp = await fetch(`${signalkBaseUrl()}/signalk/v1/api/vessels/self/environment`);
+        if (resp.ok) {
+          lastEnvironment = await resp.json();
+          renderOverviewEnv(lastEnvironment);
+        }
+      } catch (err) {
+        // Overview just leaves the interior readings hidden; deltas below
+        // will populate them if the stream comes up later
+      }
     }
 
     async function fetchSensorsSnapshot() {
@@ -1753,6 +2366,7 @@
       let statusChanged = false;
       let sensorsChanged = false;
       let electricalChanged = false;
+      let environmentChanged = false;
       for (const update of updates) {
         for (const { path, value } of update.values) {
           const sw = path.match(/^electrical\.switches\.(.+)\.state$/);
@@ -1779,6 +2393,20 @@
             obj[fieldName].value = value;
             electricalChanged = true;
           }
+          // environment.<zone>.<field> -- same walk-and-set as the solar/
+          // battery branch above, one level shallower.
+          if (path.match(/^environment\./) && lastEnvironment) {
+            const parts = path.split('.');
+            let obj = lastEnvironment;
+            for (let i = 1; i < parts.length - 1; i++) {
+              if (!obj[parts[i]]) obj[parts[i]] = {};
+              obj = obj[parts[i]];
+            }
+            const fieldName = parts[parts.length - 1];
+            if (!obj[fieldName]) obj[fieldName] = {};
+            obj[fieldName].value = value;
+            environmentChanged = true;
+          }
           const tank = path.match(/^tanks\.(freshWater|blackWater)\.currentLevel$/);
           if (tank && lastSensors) {
             lastSensors.tanks[tank[1]].currentLevel = value;
@@ -1792,6 +2420,7 @@
       if (statusChanged) renderControl(lastStatus);
       if (sensorsChanged) renderSensors(lastSensors);
       if (electricalChanged) renderPower(lastElectrical);
+      if (environmentChanged) renderOverviewEnv(lastEnvironment);
     }
 
     const RECONNECT_MS = 1000;
@@ -1813,6 +2442,7 @@
         fetchStatusSnapshot();
         fetchSensorsSnapshot();
         fetchElectricalSnapshot();
+        fetchEnvironmentSnapshot();
       };
       ws.onmessage = (msg) => {
         const delta = JSON.parse(msg.data);
@@ -1830,7 +2460,7 @@
         const base = signalkBaseUrl();
         const proto = base.startsWith('https') ? 'wss:' : 'ws:';
         const host = base.replace(/^https?:\/\//, '').replace(':3000', '');
-        const ws = new WebSocket(`${proto}//${host}:3000/signalk/v1/stream?subscribe=electrical.*,tanks.*`);
+        const ws = new WebSocket(`${proto}//${host}:3000/signalk/v1/stream?subscribe=electrical.*,tanks.*,environment.*`);
         ws.onopen = () => {};
         ws.onmessage = (msg) => {
           try {
