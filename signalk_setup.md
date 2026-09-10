@@ -196,3 +196,20 @@ sign SG4711 (§3.1).
    passive `candumpjs` verification done so far, which bypassed
    `signalk-server` entirely.
 3. Plugin development itself (§4) — not started.
+
+## 7. Navico Gateway Clarification (2026-08-27)
+
+Discovered: Signal K's current `settings.json` is configured to read from
+`10.28.94.185:10110` (the B&G Zeus3 chartplotter) instead of the local `can1`.
+The Zeus3 runs a Navico gateway that **converts NMEA 2000 to NMEA 0183 and
+sends it over the network** — it is **send-only**, with no write capability.
+
+**Decision:** Use the local `can1` interface directly instead. Reasons:
+- Direct NMEA 2000 access (not downconverted to 0183)
+- Bidirectional capability (read and write) — plugins can transmit to the bus
+- Lower latency, fewer network dependencies
+- Matches the original setup plan in §5
+
+**Action:** Remove the Navico provider from `~/.signalk/settings.json`
+(`pipedProviders`), then add a direct SocketCAN connection via the admin UI
+(Server → Data Connections → Add → NMEA 2000 → SocketCAN, interface `can1`).

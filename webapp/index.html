@@ -2059,9 +2059,10 @@
       // solar is supplying power -- could be a land/shore charger, could be
       // the engine alternator.
       const battCurrent = (batt && batt.current && batt.current.value) || 0;
-      const chargerCurrent = battCurrent - totalSolarCurrent;
+      let chargerCurrent = battCurrent - totalSolarCurrent;
+      if (chargerCurrent < 2) chargerCurrent = 0; // 2 A deadband for chargers
       const battVoltage = (batt && batt.voltage && batt.voltage.value) || 12;
-      const chargerPower = battVoltage * Math.max(0, chargerCurrent);
+      const chargerPower = battVoltage * chargerCurrent;
 
       // Load has no sensor of its own -- only battery and solar are actually
       // measured (the charger figure above is already an inference, not a
@@ -2084,6 +2085,11 @@
         solarList, batt, battCurrent, battVoltage, battPower,
         chargerCurrent, chargerPower, battDischarging, battCharging,
         solarInstancePower, solarInstanceCurrent,
+        // Signal K publishes capacity.dischargeSinceFull in coulombs (SI);
+        // the familiar Ah figure is just C / 3600. Sign is left exactly as
+        // published (Victron reports consumed charge as negative) rather
+        // than normalised here.
+        dischargeSinceFull: (batt && batt.capacity && batt.capacity.dischargeSinceFull && batt.capacity.dischargeSinceFull.value),
         soc: ((batt && batt.capacity && batt.capacity.stateOfCharge && batt.capacity.stateOfCharge.value) || 0) * 100,
         hoursRemaining: ((batt && batt.capacity && batt.capacity.timeRemaining && batt.capacity.timeRemaining.value) || 0) / 3600,
       };
@@ -2139,7 +2145,7 @@
           ${solarNodesSvg}
 
           <!-- Charger (top right) -->
-          <rect x="311" y="20" width="78" height="50" fill="none" stroke="${chargerCurrent > 2 ? 'var(--brass)' : 'var(--text-secondary)'}" stroke-width="2" rx="4"/>
+          <rect x="311" y="20" width="78" height="50" fill="none" stroke="${chargerCurrent > 0 ? 'var(--brass)' : 'var(--text-secondary)'}" stroke-width="2" rx="4"/>
           <text x="350" y="35" class="power-label" fill="var(--text-primary)">CHARGER</text>
           <text x="350" y="63" class="power-value" fill="var(--text-primary)">${Math.max(0, f.chargerPower).toFixed(0)}W</text>
 
@@ -2160,12 +2166,12 @@
           <text x="200" y="252" class="power-soc" fill="var(--text-primary)">${f.soc.toFixed(0)}%</text>
 
           <!-- Arrow: Charger → Battery (Charge current) -->
-          <path d="M 311 45 Q 260 130 230 140" class="arrow-${chargerCurrent > 2 ? 'active arrow-flowing' : 'inactive'}" fill="none" marker-end="url(#${marker})"/>
-          ${chargerCurrent > 2 ? `<text x="280" y="85" class="power-value" fill="var(--text-primary)">Charge</text><text x="280" y="105" class="power-value" fill="var(--text-primary)">${chargerCurrent.toFixed(1)}A</text>` : ''}
+          <path d="M 311 45 Q 260 130 230 140" class="arrow-${chargerCurrent > 0 ? 'active arrow-flowing' : 'inactive'}" fill="none" marker-end="url(#${marker})"/>
+          ${chargerCurrent > 0 ? `<text x="280" y="85" class="power-value" fill="var(--text-primary)">Charge</text><text x="280" y="105" class="power-value" fill="var(--text-primary)">${chargerCurrent.toFixed(1)}A</text>` : ''}
 
           <!-- Arrow: Charger → Load (shows charger supplies load power when active) -->
-          <path d="M 311 55 Q 270 80 240 100" class="arrow-${chargerCurrent > 2 ? 'active arrow-flowing' : 'inactive'}" fill="none" marker-end="url(#${marker})"/>
-          ${chargerCurrent > 2 ? `<text x="275" y="65" class="power-value" fill="var(--text-primary)">Load</text>` : ''}
+          <path d="M 311 55 Q 270 80 240 100" class="arrow-${chargerCurrent > 0 ? 'active arrow-flowing' : 'inactive'}" fill="none" marker-end="url(#${marker})"/>
+          ${chargerCurrent > 0 ? `<text x="275" y="65" class="power-value" fill="var(--text-primary)">Load</text>` : ''}
 
           <!-- Arrow: Battery ↔ Load -- direction flips with which way current is flowing -->
           <path d="${battArrowPath}" class="${battArrowClass}" fill="none" marker-end="url(#${marker})"/>
@@ -2188,6 +2194,7 @@
       const battCurrent = f.battCurrent;
       const battVoltage = f.battVoltage;
       const battPower = f.battPower;
+      const dsf = f.dischargeSinceFull;
       const diagram = powerDiagramSvg(f, 'power-diagram');
       // "chargingMode" doesn't exist in Venus's own demo data at all (it
       // uses "operationMode"/"mode" instead) -- was always silently falling
@@ -2205,6 +2212,8 @@
         <div class="battery-row"><span>Voltage</span><span style="color:var(--text-primary)">${battVoltage.toFixed(2)} V</span></div>
         <div class="battery-row"><span>Current (+charging)</span><span style="color:var(--text-primary)">${signed(battCurrent, 2)} A</span></div>
         <div class="battery-row"><span>Power (+charging)</span><span style="color:var(--text-primary)">${signed(battPower, 1)} W</span></div>
+        <div class="battery-row"><span>Discharge since full</span><span style="color:var(--text-primary)">${typeof dsf === 'number' ? signed(dsf / 3600, 2) + ' Ah' : '&mdash;'}</span></div>
+        <div class="battery-row"><span>Discharge since full (energy)</span><span style="color:var(--text-primary)">${typeof dsf === 'number' ? signed(dsf / 3600 * battVoltage, 0) + ' Wh' : '&mdash;'}</span></div>
         <div class="battery-row"><span>Time remaining</span><span style="color:var(--text-primary)">${f.hoursRemaining.toFixed(1)} h</span></div>
       ` : 'No solar charger data available');
       // Both panes are detached from the document while Signal K is off
