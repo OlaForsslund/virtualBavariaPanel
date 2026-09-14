@@ -400,8 +400,11 @@
     .ov-light { cursor: pointer; }
     .ov-glow { opacity: 0; transition: opacity 200ms; }
     .ov-dot { transition: fill 200ms; }
-    .ov-fridge-icon { stroke: var(--cold); }
-    .ov-fridge-value { fill: var(--cold); }
+    /* Cabin and fridge are labelled in black, straight onto the white hull.
+       Sea temperature is the same label-over-value pair but sits outside
+       the hull, so it takes the water colour to stay legible on the dark
+       ground -- and so it doesn't read as a fourth interior reading. */
+    .ov-sea-label, .ov-sea-value { fill: var(--water-light); }
     /* Hull art is a builder's line drawing, hardcoded white/blue rather
        than themed -- knock it back at night so it isn't the brightest
        thing on a dark helm. */
@@ -617,22 +620,27 @@
               <!-- Interior readings, painted inside the white hull like
                    labels on a deck plan. Each group is hidden outright when
                    its sensor has no value, rather than showing a dash. -->
+              <!-- Cabin is left-aligned, not centred like the other two: its
+                   value is the only one whose width moves (humidity digits
+                   come and go), and centring would slide the whole block
+                   around under the fridge's fixed one. -->
               <g id="ov-cabin" display="none">
-                <text x="320" y="583" text-anchor="middle" font-size="11" font-weight="bold" fill="#000000">CABIN</text>
-                <text id="ov-cabin-value" x="320" y="600" text-anchor="middle" font-size="13" font-weight="bold" fill="#000000"></text>
+                <text x="273" y="583" font-size="11" font-weight="bold" fill="#000000">CABIN</text>
+                <text id="ov-cabin-value" x="273" y="602" xml:space="preserve" font-size="16" font-weight="bold" fill="#000000"></text>
               </g>
               <g id="ov-fridge" display="none">
-                <rect x="185" y="571" width="78" height="38" rx="6" fill="#06202f" opacity="0.92" stroke="var(--cold)" stroke-opacity="0.65" stroke-width="1"/>
-                <g class="ov-fridge-icon" transform="translate(203,590)" stroke-width="1.8" fill="none" stroke-linecap="round">
-                  <line x1="0" y1="-9" x2="0" y2="9"/>
-                  <line x1="-7.8" y1="-4.5" x2="7.8" y2="4.5"/>
-                  <line x1="-7.8" y1="4.5" x2="7.8" y2="-4.5"/>
-                  <line x1="0" y1="-9" x2="-3" y2="-6"/>
-                  <line x1="0" y1="-9" x2="3" y2="-6"/>
-                  <line x1="0" y1="9" x2="-3" y2="6"/>
-                  <line x1="0" y1="9" x2="3" y2="6"/>
-                </g>
-                <text id="ov-fridge-value" class="ov-fridge-value" x="235" y="595" text-anchor="middle" font-size="13" font-weight="bold"></text>
+                <text x="226" y="583" text-anchor="middle" font-size="11" font-weight="bold" fill="#000000">FRIDGE</text>
+                <text id="ov-fridge-value" x="226" y="602" text-anchor="middle" font-size="16" font-weight="bold" fill="#000000"></text>
+              </g>
+
+              <!-- Sea temperature, in the water forward of the keel -- the
+                   one reading here that belongs outside the boat, so it's
+                   labelled like the interior ones but takes the water
+                   colour. Hidden unless the instruments are actually
+                   feeding it; see showSeaTemperature(). -->
+              <g id="ov-sea" display="none">
+                <text class="ov-sea-label" x="390" y="645" text-anchor="middle" font-size="11" font-weight="bold">SEA</text>
+                <text id="ov-sea-value" class="ov-sea-value" x="390" y="664" text-anchor="middle" font-size="16" font-weight="bold"></text>
               </g>
             </svg>
           </div>
@@ -2295,9 +2303,12 @@
         cabinGroup.setAttribute('display', 'none');
       } else {
         // Signal K units: temperature in kelvin, humidity as a 0-1 ratio.
+        // Joined with plain spaces (the <text> carries xml:space="preserve",
+        // so the run survives) rather than a separator dot -- "RH" labels the
+        // second figure and keeps the two apart on its own.
         const parts = [`${(cabinT - 273.15).toFixed(1)}°C`];
-        if (cabinRh !== null) parts.push(`${Math.round(cabinRh * 100)}%`);
-        document.getElementById('ov-cabin-value').textContent = parts.join(' · ');
+        if (cabinRh !== null) parts.push(`${Math.round(cabinRh * 100)}% RH`);
+        document.getElementById('ov-cabin-value').textContent = parts.join('  ');
         cabinGroup.setAttribute('display', 'inline');
       }
 
@@ -2309,6 +2320,46 @@
         document.getElementById('ov-fridge-value').textContent = `${(fridgeT - 273.15).toFixed(1)}°C`;
         fridgeGroup.setAttribute('display', 'inline');
       }
+    }
+
+    // -- Overview sea temperature. Unlike cabin/fridge (BLE sensors on the
+    // Pi's own radio, alive whenever the Pi is) this comes off the N2K bus
+    // as PGN 130311, so it exists only while the instruments are switched
+    // on -- and must vanish when they go off rather than freeze at the last
+    // reading.
+    //
+    // Freshness is therefore delta-driven, not read off the value's
+    // timestamp. Two reasons: Signal K's REST tree keeps serving the last
+    // water temperature indefinitely after the instruments are killed, and
+    // comparing its timestamp against Date.now() would trust the MFD's
+    // clock, which has no NTP and can be hours out. "Did a delta arrive
+    // recently?" needs no clock at all. The feed runs ~3.5 Hz when live, so
+    // even this tight a window can't flicker.
+    //
+    // This leans on connectSignalKSubscribe()'s query string NOT replaying
+    // the last known value on connect -- verified 2026-09-14 with the
+    // instruments off: three fresh connections with our
+    // `?subscribe=electrical.*,tanks.*,environment.*` got zero water-
+    // temperature deltas, while `?subscribe=self` got exactly one, stamped
+    // minutes old. If that subscription is ever changed to a plain `self`,
+    // gate the show on the delta's own timestamp against the newest
+    // timestamp seen from the same server (never against Date.now()), or
+    // this will flash a stale reading on every page load.
+    const SEA_STALE_MS = 30000;
+    let seaStaleTimer = null;
+
+    function hideSeaTemperature() {
+      const group = document.getElementById('ov-sea');
+      if (group) group.setAttribute('display', 'none');
+    }
+
+    function showSeaTemperature(kelvin) {
+      const group = document.getElementById('ov-sea');
+      if (!group) return; // pane detached -- Signal K off
+      document.getElementById('ov-sea-value').textContent = `${(kelvin - 273.15).toFixed(1)}°C`;
+      group.setAttribute('display', 'inline');
+      clearTimeout(seaStaleTimer);
+      seaStaleTimer = setTimeout(hideSeaTemperature, SEA_STALE_MS);
     }
 
     async function fetchEnvironmentSnapshot() {
@@ -2401,6 +2452,13 @@
             if (!obj[fieldName]) obj[fieldName] = {};
             obj[fieldName].value = value;
             electricalChanged = true;
+          }
+          // Sea temperature is handled ahead of the generic environment
+          // branch and outside it: that branch drops everything until the
+          // REST snapshot has populated lastEnvironment, and this readout
+          // is deliberately fed by deltas alone (see showSeaTemperature).
+          if (path === 'environment.water.temperature' && typeof value === 'number') {
+            showSeaTemperature(value);
           }
           // environment.<zone>.<field> -- same walk-and-set as the solar/
           // battery branch above, one level shallower.
