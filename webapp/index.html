@@ -733,6 +733,18 @@
           "http://" or a port &mdash; port 3000 is assumed.
         </p>
         <p id="signalk-url-status"></p>
+        <p>
+          <label><input type="checkbox" id="solar-load-enabled" onchange="onSolarLoadEnabledChange()"> Show the solar controller's load output on the power diagram</label><br>
+          <input type="text" id="solar-load-input" placeholder="NETWORK" maxlength="14" style="width: 100%; box-sizing: border-box;" disabled onfocus="this.scrollIntoView({behavior: 'smooth', block: 'start'})">
+          <button class="action-btn" onclick="saveSolarLoad()">Save</button>
+        </p>
+        <p style="color: var(--text-secondary); font-size: 0.9em;">
+          The MPPT's own load terminals, wired past the boat's DC distribution
+          &mdash; separate from the diagram's LOAD, not part of it. Shown only
+          if the controller reports a load current. The text above labels the
+          branch; on this boat it feeds the router and the Pi.
+        </p>
+        <p id="solar-load-status"></p>
       </section>
     </div>
   </div>
@@ -1500,6 +1512,9 @@
             // can't cache locally; server config is still the source of truth next load
           }
         }
+        if (typeof config.solar_load_label === 'string') {
+          applySolarLoadLabel(config.solar_load_label);
+        }
         if (typeof config.signalk_url === 'string' && !loadCachedSignalkUrl()) {
           // Only adopt the server's value if this device has no local override yet --
           // a device-specific override (e.g. dev laptop pointed at venus.local) should
@@ -1878,6 +1893,56 @@
     // Populate the example IP in the help text
     document.getElementById('signalk-example-ip').textContent = location.hostname;
 
+    // The solar load-output label is boat-wide, not device-specific (unlike
+    // signalkUrl, which a dev laptop may legitimately point somewhere else),
+    // so it lives in server config only -- no localStorage copy to diverge.
+    // Empty string = the branch isn't drawn at all.
+    let solarLoadLabel = '';
+
+    // The label is free text from the Config tab and the diagram is built as
+    // an HTML string, so it has to be escaped on the way in.
+    function escapeHtml(text) {
+      return String(text).replace(/[&<>"']/g, (c) => (
+        { '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]
+      ));
+    }
+
+    function applySolarLoadLabel(label) {
+      solarLoadLabel = label || '';
+      document.getElementById('solar-load-enabled').checked = !!solarLoadLabel;
+      const input = document.getElementById('solar-load-input');
+      input.value = solarLoadLabel;
+      input.disabled = !solarLoadLabel;
+      if (lastElectrical) renderPower(lastElectrical);
+    }
+
+    function onSolarLoadEnabledChange() {
+      const input = document.getElementById('solar-load-input');
+      input.disabled = !document.getElementById('solar-load-enabled').checked;
+      if (!input.disabled && !input.value.trim()) input.value = 'NETWORK';
+    }
+
+    async function saveSolarLoad() {
+      const statusEl = document.getElementById('solar-load-status');
+      const enabled = document.getElementById('solar-load-enabled').checked;
+      const value = enabled ? document.getElementById('solar-load-input').value.trim() : '';
+      if (enabled && !value) {
+        statusEl.textContent = 'enter a label, or uncheck the box to hide the branch';
+        return;
+      }
+      applySolarLoadLabel(value);
+      try {
+        await fetch('/config', {
+          method: 'PUT',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ solar_load_label: value }),
+        });
+        statusEl.textContent = 'saved';
+      } catch (err) {
+        statusEl.textContent = 'not saved (server unreachable)';
+      }
+    }
+
     async function saveSignalkUrl() {
       const statusEl = document.getElementById('signalk-url-status');
       const enabled = document.getElementById('signalk-url-enabled').checked;
@@ -2060,6 +2125,28 @@
       // when the battery-side figure isn't published for that instance.
       const solarInstanceCurrent = (s) => (s.current && s.current.value) || (s.panelCurrent && s.panelCurrent.value) || 0;
       const solarInstancePower = (s) => (s.panelPower && s.panelPower.value) || 0;
+
+      // The controller's own load output -- a separate pair of terminals on
+      // the MPPT, NOT part of the boat's DC distribution, so it is emphatically
+      // not the LOAD node below. Here it feeds the always-on IP gear (router +
+      // Pi) directly off the controller.
+      //
+      // Unlike LOAD this is a real measurement (loadCurrent x the controller's
+      // own bus voltage), which is why it may honestly show a wattage. null --
+      // not 0 -- when no instance publishes loadCurrent at all, so a controller
+      // without the feature stays blank rather than claiming a measured zero.
+      // Prefer the published loadPower: it is the product of two fields from
+      // a single advertisement, so it is a true instantaneous figure. Fall
+      // back to loadCurrent x the controller's own bus voltage for sources
+      // that do not publish it.
+      const solarLoadWatts = solarList.reduce((sum, s) => {
+        const w = s.loadPower && s.loadPower.value;
+        if (typeof w === 'number') return (sum === null ? 0 : sum) + w;
+        const a = s.loadCurrent && s.loadCurrent.value;
+        if (typeof a !== 'number') return sum;
+        const v = (s.voltage && s.voltage.value) || 12;
+        return (sum === null ? 0 : sum) + a * v;
+      }, null);
       const totalSolarCurrent = solarList.reduce((sum, s) => sum + solarInstanceCurrent(s), 0);
 
       // Infer charger power: battery current - total solar current (summed
@@ -2090,14 +2177,14 @@
       const battCharging = battCurrent > 0.5;     // positive -- absorbing the load's surplus
 
       return {
+        solarLoadWatts,
         solarList, batt, battCurrent, battVoltage, battPower,
         chargerCurrent, chargerPower, battDischarging, battCharging,
         solarInstancePower, solarInstanceCurrent,
-        // Signal K publishes capacity.dischargeSinceFull in coulombs (SI);
-        // the familiar Ah figure is just C / 3600. Sign is left exactly as
-        // published (Victron reports consumed charge as negative) rather
-        // than normalised here.
-        dischargeSinceFull: (batt && batt.capacity && batt.capacity.dischargeSinceFull && batt.capacity.dischargeSinceFull.value),
+        // Amp-hours taken out of the bank since it was last full, published
+        // in Ah and positive (bt-sensors reads the shunt's raw unsigned
+        // magnitude straight through). Sign is left exactly as published.
+        dischargeSinceFull: (batt && batt.capacity && batt.capacity.ampHoursConsumed && batt.capacity.ampHoursConsumed.value),
         soc: ((batt && batt.capacity && batt.capacity.stateOfCharge && batt.capacity.stateOfCharge.value) || 0) * 100,
         hoursRemaining: ((batt && batt.capacity && batt.capacity.timeRemaining && batt.capacity.timeRemaining.value) || 0) / 3600,
       };
@@ -2140,6 +2227,34 @@
         `;
       }).join('');
 
+      // The controller's load output: its own branch straight down from the
+      // solar box, deliberately never touching the LOAD circle -- these
+      // terminals bypass the boat's DC distribution entirely, and a line into
+      // LOAD would claim a connection that doesn't exist. Drawn only when a
+      // label is configured AND the controller actually publishes the figure.
+      const solarLoadWatts = f.solarLoadWatts;
+      const showSolarLoad = !!solarLoadLabel && typeof solarLoadWatts === 'number';
+      const lastSolarBox = solarLayout[solarLayout.length - 1];
+      // The label is free text, so the box sizes itself to it rather than
+      // inheriting the solar box's width: uppercase runs ~14 units per
+      // character at .power-label size (measured), and the solar box's 76
+      // would fit barely five. Growth is rightwards into empty diagram (the
+      // battery doesn't start until x=162) with the left edges kept flush,
+      // so the arrow slants slightly instead of the box drifting off-centre.
+      // Past the cap the label shrinks to fit rather than overflowing.
+      const loadLabelW = solarLoadLabel.length * 14;
+      const loadBoxW = Math.min(140, Math.max(lastSolarBox.w, loadLabelW + 14));
+      const loadBoxCx = lastSolarBox.x + loadBoxW / 2;
+      const loadLabelEm = (1.05 * Math.min(1, (loadBoxW - 12) / Math.max(1, loadLabelW))).toFixed(2);
+      const solarLoadSvg = !showSolarLoad ? '' : `
+          <path d="M ${lastSolarBox.x + lastSolarBox.w / 2} ${lastSolarBox.y + lastSolarBox.h} L ${loadBoxCx} 173"
+                class="arrow-${solarLoadWatts > 0 ? 'active arrow-flowing' : 'inactive'}" fill="none" marker-end="url(#${marker})"/>
+          <rect x="${lastSolarBox.x}" y="175" width="${loadBoxW}" height="50" rx="4"
+                fill="none" stroke="${solarLoadWatts > 0 ? 'var(--brass)' : 'var(--text-secondary)'}" stroke-width="2"/>
+          <text x="${loadBoxCx}" y="190" class="power-label" style="font-size:${loadLabelEm}em" fill="var(--text-primary)">${escapeHtml(solarLoadLabel)}</text>
+          <text x="${loadBoxCx}" y="218" class="power-value" fill="var(--text-primary)">${solarLoadWatts.toFixed(0)}W</text>
+      `;
+
       // Arrowhead direction follows the path's own direction. Load is at
       // cy=110 r=40 (bottom at 150); the battery's terminals top out at 215.
       // Discharging (neg): arrow from battery to load. Charging (pos): the
@@ -2151,6 +2266,9 @@
         <svg viewBox="0 0 400 300" id="${id}" class="power-diagram">
           <!-- Solar panel(s) (top left) -->
           ${solarNodesSvg}
+
+          <!-- Controller load output (below the solar box, separate from LOAD) -->
+          ${solarLoadSvg}
 
           <!-- Charger (top right) -->
           <rect x="311" y="20" width="78" height="50" fill="none" stroke="${chargerCurrent > 0 ? 'var(--brass)' : 'var(--text-secondary)'}" stroke-width="2" rx="4"/>
@@ -2220,8 +2338,8 @@
         <div class="battery-row"><span>Voltage</span><span style="color:var(--text-primary)">${battVoltage.toFixed(2)} V</span></div>
         <div class="battery-row"><span>Current (+charging)</span><span style="color:var(--text-primary)">${signed(battCurrent, 2)} A</span></div>
         <div class="battery-row"><span>Power (+charging)</span><span style="color:var(--text-primary)">${signed(battPower, 1)} W</span></div>
-        <div class="battery-row"><span>Discharge since full</span><span style="color:var(--text-primary)">${typeof dsf === 'number' ? signed(dsf / 3600, 2) + ' Ah' : '&mdash;'}</span></div>
-        <div class="battery-row"><span>Discharge since full (energy)</span><span style="color:var(--text-primary)">${typeof dsf === 'number' ? signed(dsf / 3600 * battVoltage, 0) + ' Wh' : '&mdash;'}</span></div>
+        <div class="battery-row"><span>Discharge since full</span><span style="color:var(--text-primary)">${typeof dsf === 'number' ? signed(dsf, 2) + ' Ah' : '&mdash;'}</span></div>
+        <div class="battery-row"><span>Discharge since full (energy)</span><span style="color:var(--text-primary)">${typeof dsf === 'number' ? signed(dsf * battVoltage, 0) + ' Wh' : '&mdash;'}</span></div>
         <div class="battery-row"><span>Time remaining</span><span style="color:var(--text-primary)">${f.hoursRemaining.toFixed(1)} h</span></div>
       ` : 'No solar charger data available');
       // Both panes are detached from the document while Signal K is off
