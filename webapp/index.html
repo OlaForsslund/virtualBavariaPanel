@@ -2326,11 +2326,37 @@
       // uses "operationMode"/"mode" instead) -- was always silently falling
       // back to the em-dash there. operationMode's the more descriptive of
       // the two ("mppt active" vs. "on"), so it's tried first now.
-      const solarDetailsHtml = solarList.map((s, i) => `
-        <h4 style="margin-top: 20px; color: var(--text-primary);">${solarList.length > 1 ? `Solar ${i + 1}` : 'Solar'} Details</h4>
-        <div class="battery-row"><span>Mode</span><span style="color:var(--text-primary)">${(s.operationMode && s.operationMode.value) || (s.chargingMode && s.chargingMode.value) || (s.mode && s.mode.value) || '&mdash;'}</span></div>
-        <div class="battery-row"><span>Yield today</span><span style="color:var(--text-primary)">${(((s.yieldToday && s.yieldToday.value) || 0) / 3.6e6).toFixed(1)} kWh</span></div>
-      `).join('');
+      // bt-sensors' Victron reader publishes neither: it has "state" as a
+      // {code, message} object ("BULK", "FLOAT", ...), tried first here.
+      const solarMode = (s) =>
+        (s.state && s.state.value && s.state.value.message) ||
+        (s.operationMode && s.operationMode.value) || (s.chargingMode && s.chargingMode.value) ||
+        (s.mode && s.mode.value) || null;
+      // yieldToday is J (SI) in Venus's data but Wh from bt-sensors -- go by
+      // the declared unit. Deltas only overwrite .value, so the meta from the
+      // REST snapshot survives.
+      const solarYieldKwh = (s) => {
+        const y = s.yieldToday;
+        if (!y || typeof y.value !== 'number') return null;
+        return y.value / (y.meta && y.meta.units === 'Wh' ? 1000 : 3.6e6);
+      };
+      // bt-sensors carries no model field, but its $source label names the
+      // device ("Victron SmartSolar Charger MPPT 75/15") -- the REST snapshot
+      // has it and deltas only touch .value, so it sticks. Numbered when
+      // there are several, since two identical models share a label.
+      const solarTitle = (s, i) => {
+        const field = Object.keys(s).map(k => s[k]).find(v => v && v.$source);
+        const num = solarList.length > 1 ? ` ${i + 1}` : '';
+        return field ? escapeHtml(field.$source) + num : `Solar${num} Details`;
+      };
+      const solarDetailsHtml = solarList.map((s, i) => {
+        const kwh = solarYieldKwh(s);
+        return `
+        <h4 style="margin-top: 20px; color: var(--text-primary);">${solarTitle(s, i)}</h4>
+        <div class="battery-row"><span>Mode</span><span style="color:var(--text-primary)">${solarMode(s) ? escapeHtml(solarMode(s)) : '&mdash;'}</span></div>
+        <div class="battery-row"><span>Yield today</span><span style="color:var(--text-primary)">${kwh === null ? '&mdash;' : kwh.toFixed(2) + ' kWh'}</span></div>
+      `;
+      }).join('');
       const detailedHtml = diagram + (solarList.length ? `
         ${solarDetailsHtml}
         ${chargerCurrent > 0 ? `<h4 style="margin-top: 20px; color: var(--text-primary);">Charger</h4><div class="battery-row"><span>Current</span><span style="color:var(--text-primary)">${chargerCurrent.toFixed(2)} A</span></div>` : ''}
