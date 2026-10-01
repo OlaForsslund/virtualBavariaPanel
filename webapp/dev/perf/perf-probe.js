@@ -21,6 +21,10 @@
   if (!window.performance || !performance.timing) return;
 
   var BEACON = location.protocol + '//' + location.hostname + ':8099/b';
+
+  // ?view=X opens page X: the MFD drops #fragments from tile URLs.
+  var view = location.search.match(/[?&]view=([a-z-]+)/);
+  if (view && !location.hash) location.hash = view[1];
   var run = Math.random().toString(36).slice(2, 8);
   var IDLE_WINDOW_MS = 60000;
   var LAG_INTERVAL_MS = 250;
@@ -31,6 +35,16 @@
       if (data.hasOwnProperty(k)) q.push(k + '=' + encodeURIComponent(data[k]));
     }
     new Image().src = BEACON + '?' + q.join('&');
+  }
+
+  // The MFD keeps every page it opened alive; a new probe page retires the older ones.
+  if (window.BroadcastChannel) {
+    var channel = new BroadcastChannel('vbp-perf-probe');
+    channel.onmessage = function () {
+      send('retire', {});
+      setTimeout(function () { location.replace('about:blank'); }, 300);
+    };
+    channel.postMessage(run);
   }
 
   window.addEventListener('error', function (e) {
@@ -63,14 +77,14 @@
 
   // Live-update traffic: WebSocket messages from the page's own host
   // (gateway) vs elsewhere (e.g. Signal K :3000), plus fetch() calls.
-  var wsGateway = 0, wsOther = 0, wsBytes = 0, fetches = 0;
+  var wsGateway = 0, wsOther = 0, wsBytes = 0, fetches = 0, lastGatewayMsgAt = 0;
   var NativeWS = window.WebSocket;
   if (NativeWS) {
     var CountingWS = function (url, protocols) {
       var ws = protocols === undefined ? new NativeWS(url) : new NativeWS(url, protocols);
       var fromGateway = String(url).indexOf('//' + location.host + '/') !== -1;
       ws.addEventListener('message', function (e) {
-        if (fromGateway) wsGateway++; else wsOther++;
+        if (fromGateway) { wsGateway++; lastGatewayMsgAt = performance.now(); } else wsOther++;
         wsBytes += (e.data && e.data.length) || 0;
       });
       return ws;
@@ -101,12 +115,25 @@
         var t0 = performance.now();
         try { return fn.apply(this, arguments); }
         finally {
+          var t1 = performance.now();
           var st = renderStats[name] || (renderStats[name] = { n: 0, ms: 0 });
-          st.n++; st.ms += performance.now() - t0;
+          st.n++; st.ms += t1 - t0;
+          if (name === 'renderControl') reportSwitchRender(t0, t1);
         }
       };
     });
   });
+  // One t=switch report per relay-state render: JS time, time until painted, time since the gateway message.
+  function reportSwitchRender(t0, t1) {
+    var since = lastGatewayMsgAt;
+    requestAnimationFrame(function () {
+      requestAnimationFrame(function () {
+        var t2 = performance.now();
+        send('switch', { js: Math.round(t1 - t0), paint: Math.round(t2 - t0), msg: since ? Math.round(t2 - since) : '' });
+      });
+    });
+  }
+
   function takeRenderStats() {
     var parts = [];
     for (var k in renderStats) {

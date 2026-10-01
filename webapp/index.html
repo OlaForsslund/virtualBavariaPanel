@@ -1,5 +1,7 @@
 <!DOCTYPE html>
 <html lang="en">
+<!-- Performance measurement mode (dev only, see webapp/dev/perf/): uncomment the next line. -->
+<!-- <script src="/dev/perf/perf-probe.js?v=11"></script> -->
 <script>
   // MFD adds mfd_name etc. to the URL; html.mfd enables plotter-only CSS (?mfd forces it).
   if (/[?&](mfd_name=|mfd(&|$))/.test(location.search)) document.documentElement.classList.add('mfd');
@@ -367,60 +369,37 @@
     html.mfd .arrow-flowing { animation: none; }
     html.mfd * { font-family: 'Handset Condensed', sans-serif !important; }
 
-    /* -- Overview page --------------------------------------------------
-       The rig is a triangle with the mast ~70% across the artwork, so the
-       upper-left of the pane is empty real estate -- that's where the
-       (identical) Power diagram and the tank bars go, rather than a
-       column beside the boat.
-
-       The masthead deliberately rises into the nav bar, as in the design
-       sketch. #swipe-viewport clips at its padding box, so the boat can
-       only reach up there if the viewport itself extends back behind the
-       nav: hence the margin-top/padding-top pair, which cancel out so
-       nothing else moves. Applied only while Overview is the active page,
-       so every other pane is untouched. --nav-h is measured at runtime
-       (syncNavHeight) rather than hardcoded -- the nav's height follows
-       the arrow font size, which the 360px media query changes. */
-    /* The nav has to stay ABOVE the overlapping pane, or it covers the
-       arrows and swallows their clicks. The mast still reads as rising into
-       the header because the bar itself is transparent there -- only the
-       arrow buttons and the centred label text are opaque, and the mast
-       passes between them. */
-    body.overview-active nav { position: relative; z-index: 3; border-bottom-color: transparent; }
+    /* -- Overview page: the mast rises into the nav (viewport extended behind it). */
+    body.overview-active nav { position: relative; z-index: 1; border-bottom-color: transparent; }
     body.overview-active #nav-label { background: transparent; }
     body.overview-active #swipe-viewport {
       position: relative;
       z-index: 2;
       margin-top: calc(-1 * var(--nav-h, 48px));
       padding-top: var(--nav-h, 48px);
+      pointer-events: none; /* the boat sits over the nav; taps fall through to the arrows */
     }
+    body.overview-active #swipe-track { pointer-events: auto; }
     .ov-wrap { display: flex; align-items: flex-start; gap: 12px; }
-    .ov-col { flex: 1 1 auto; min-width: 0; }
-    .ov-boat { flex: 0 0 auto; margin-top: calc(-1 * var(--nav-h, 48px)); }
-    /* Sized by syncOverviewLayout(), not CSS: this Chromium predates
-       aspect-ratio sizing of an <svg> from viewBox + one dimension, so
-       both are set explicitly. overflow:visible lets the stern/deck beams
-       spill outside the viewBox and wash over the data column, which is
-       the point of them. */
+    #ov-left { flex: 0 1 280px; min-width: 0; position: relative; z-index: 3; margin-top: 4px; }
+    #ov-data { margin-top: 14px; max-width: 280px; }
+    .data-row { display: flex; justify-content: space-between; align-items: baseline; padding: 8px 4px; border-top: 1px solid var(--border); }
+    .data-row:last-child { border-bottom: 1px solid var(--border); }
+    .data-row span:first-child { text-transform: uppercase; letter-spacing: 0.03em; font-size: 0.9em; color: var(--text-secondary); }
+    .data-row span:last-child { font-size: 1.4em; font-weight: bold; }
+    .ov-boat { flex: 0 0 auto; position: relative; margin-top: calc(-1 * var(--nav-h, 48px)); pointer-events: none; }
+    /* Sized by syncOverviewLayout() (no viewBox-based sizing in this Chromium). */
     .ov-boat svg { display: block; overflow: visible; }
-    .ov-light { cursor: pointer; }
+    .ov-overlay {
+      position: absolute; top: 80px; left: 0; width: 42%; max-height: calc(100% - 80px);
+      overflow: hidden; box-sizing: border-box; padding: 8px;
+      background: rgba(6, 24, 38, 0.62); border-radius: 10px; z-index: 1;
+    }
+    .ov-light { cursor: pointer; pointer-events: auto; }
     .ov-glow { opacity: 0; transition: opacity 200ms; }
     .ov-dot { transition: fill 200ms; }
-    /* Cabin and fridge are labelled in black, straight onto the white hull.
-       Sea temperature is the same label-over-value pair but sits outside
-       the hull, so it takes the water colour to stay legible on the dark
-       ground -- and so it doesn't read as a fourth interior reading. */
     .ov-sea-label, .ov-sea-value { fill: var(--water-light); }
-    /* Hull art is a builder's line drawing, hardcoded white/blue rather
-       than themed -- knock it back at night so it isn't the brightest
-       thing on a dark helm. */
     :root[data-theme="night"] .ov-boat { opacity: 0.72; }
-    .ov-tanks { margin-top: 12px; max-width: 460px; }
-    .ov-env { margin-top: 12px; }
-    /* Below 620px -- the same cutoff .sensors-panel uses, chosen because it
-       clears the 642px autopilot-expanded pane and excludes every split
-       width -- the wedge has no room. Stack, and let the body scroll:
-       also what a phone in portrait wants. */
     @media (max-width: 619px) {
       .ov-wrap { display: block; }
       .ov-boat { margin-top: 0; }
@@ -436,40 +415,28 @@
 
   <div id="swipe-viewport" class="view active">
     <div id="swipe-track">
-      <!-- Overview: the boat plan with live navigation/deck lights, the
-           same power diagram the Power page draws, and the tank bars, all
-           laid into the empty wedge left of the rig. Gated behind Signal K
-           alongside Power (see SIGNALK_GATED) -- the diagram and the
-           cabin/fridge readings have no other source.
-           Artwork is the builder's line drawing from the design sketch,
-           minus its 8x5px window decal (a clipPath + base64 <image> worth
-           4KB and invisible at this scale). -->
+      <!-- Overview: boat side view (builder's drawing) with live lights, buttons, data and tanks. Gated behind Signal K. -->
       <section id="view-overview" class="pane">
         <div class="ov-wrap">
-          <div class="ov-col">
-            <div id="ov-power">loading&hellip;</div>
-            <div class="ov-tanks">
-              <div class="gauge">
-                <div class="gauge-label">Freshwater</div>
-                <div class="gauge-bar"><div class="gauge-fill" id="ov-gauge-fresh" style="width:0%"></div></div>
-                <div class="gauge-scale">
-                  <span id="ov-value-fresh">&mdash;</span>
-                  <span class="gauge-max" id="ov-max-fresh"></span>
-                </div>
-              </div>
+          <div id="ov-left">
+            <div id="ov-essentials"></div>
+            <div id="ov-data">
+              <div class="data-row"><span>Battery SOC</span><span id="ov-data-soc">&mdash;</span></div>
+              <div class="data-row"><span>Battery power</span><span id="ov-data-power">&mdash;</span></div>
+              <div class="data-row"><span>Fridge</span><span id="ov-data-fridge">&mdash;</span></div>
+            </div>
+          </div>
+          <div class="ov-boat">
+            <div class="ov-overlay">
+              <div class="tank-cylinder-mount" id="fresh-cyl-ov"></div>
+              <div class="gauge-value" id="ov-value-fresh">&mdash;</div>
               <div class="gauge">
                 <div class="gauge-label">Blackwater</div>
                 <div class="gauge-bar"><div class="gauge-fill" id="ov-gauge-black" style="width:0%"></div></div>
-                <div class="gauge-scale">
-                  <span id="ov-value-black">&mdash;</span>
-                  <span class="gauge-max" id="ov-max-black"></span>
-                </div>
+                <div class="gauge-value" id="ov-value-black">&mdash;</div>
               </div>
             </div>
-          </div>
-
-          <div class="ov-boat">
-            <svg id="ov-boat-svg" viewBox="90 80 440 605" xmlns="http://www.w3.org/2000/svg">
+            <svg id="ov-boat-svg" viewBox="97 53 385 622" xmlns="http://www.w3.org/2000/svg">
               <defs>
                 <radialGradient id="ovSteamBeam" cx="324" cy="314" r="100" gradientUnits="userSpaceOnUse">
                   <stop offset="0%" stop-color="#FDF6E3" stop-opacity="0.55"/>
@@ -489,8 +456,6 @@
                 </radialGradient>
               </defs>
 
-              <!-- Port light glow is drawn UNDER the hull so the hull occludes
-                   it and it only spills above the sheerline. -->
               <circle id="ovPortGlow" class="ov-glow" cx="417" cy="553" r="26" fill="url(#ovPortGlowGrad)"/>
 
               <g class="ov-hull">
@@ -559,26 +524,28 @@
                 <line fill="none" stroke="#000000" stroke-width="0.2835" stroke-miterlimit="10" x1="168.875" y1="522.24" x2="305.667" y2="91.333"/>
               </g>
 
-              <!-- Dimensions, CAD-drawing style -->
-              <g stroke="#B8C4CC" stroke-width="1">
-                <line x1="313" y1="91" x2="478" y2="91"/>
-                <line x1="313" y1="617" x2="478" y2="617"/>
-                <line x1="313" y1="673" x2="478" y2="673"/>
-                <line x1="478" y1="101" x2="478" y2="607"/>
-                <path d="M478,91 L473,101 L483,101 Z" fill="#B8C4CC" stroke="none"/>
-                <path d="M478,617 L473,607 L483,607 Z" fill="#B8C4CC" stroke="none"/>
-                <line x1="478" y1="627" x2="478" y2="663"/>
-                <path d="M478,617 L473,627 L483,627 Z" fill="#B8C4CC" stroke="none"/>
-                <path d="M478,673 L473,663 L483,663 Z" fill="#B8C4CC" stroke="none"/>
+              <!-- VHF antenna, 1 m (35 units) above the masthead. -->
+              <g id="ov-antenna">
+                <line x1="308.5" y1="90.5" x2="308.5" y2="55.5" stroke="#000000" stroke-width="3" stroke-linecap="round"/>
+                <line x1="308.5" y1="90.5" x2="308.5" y2="59.5" stroke="#FFFFFF" stroke-width="1.8"/>
+                <rect x="306.5" y="87" width="4" height="4" fill="#D1D5DB" stroke="#000000" stroke-width="0.5"/>
               </g>
-              <text x="498" y="354" transform="rotate(-90,498,354)" text-anchor="middle" font-size="19" font-weight="bold" fill="#E9EDE7" stroke="#061826" stroke-width="3.5" paint-order="stroke">15 m</text>
-              <text x="498" y="645" transform="rotate(-90,498,645)" text-anchor="middle" font-size="18" font-weight="bold" fill="#E9EDE7" stroke="#061826" stroke-width="3.5" paint-order="stroke">1.58 m</text>
 
-              <!-- Lights. Each group's data-light key maps to circuits in
-                   OVERVIEW_LIGHTS; state comes from /status, never from a
-                   local toggle, so panel button presses stay in sync. -->
+              <g stroke="#B8C4CC" stroke-width="1">
+                <line x1="312" y1="55.5" x2="460" y2="55.5"/>
+                <line x1="313" y1="617" x2="460" y2="617"/>
+                <line x1="313" y1="673" x2="460" y2="673"/>
+                <line x1="460" y1="65.5" x2="460" y2="607"/>
+                <path d="M460,55.5 L455,65.5 L465,65.5 Z" fill="#B8C4CC" stroke="none"/>
+                <path d="M460,617 L455,607 L465,607 Z" fill="#B8C4CC" stroke="none"/>
+                <line x1="460" y1="627" x2="460" y2="663"/>
+                <path d="M460,617 L455,627 L465,627 Z" fill="#B8C4CC" stroke="none"/>
+                <path d="M460,673 L455,663 L465,663 Z" fill="#B8C4CC" stroke="none"/>
+              </g>
+              <text x="480" y="336" transform="rotate(-90,480,336)" text-anchor="middle" font-size="19" font-weight="bold" fill="#E9EDE7" stroke="#061826" stroke-width="3.5" paint-order="stroke">16.0 m</text>
+              <text x="480" y="645" transform="rotate(-90,480,645)" text-anchor="middle" font-size="18" font-weight="bold" fill="#E9EDE7" stroke="#061826" stroke-width="3.5" paint-order="stroke">1.58 m</text>
+
               <g id="ov-lights" font-size="11" font-weight="bold">
-                <!-- anchor: white, 360 all-round, masthead -->
                 <g class="ov-light" data-light="anchor" data-color="#FDF6E3">
                   <circle cx="317" cy="91" r="32" fill="transparent"/>
                   <circle class="ov-glow" cx="317" cy="91" r="30" fill="#FDF6E3" fill-opacity="0.28"/>
@@ -586,36 +553,30 @@
                   <text x="330" y="95" fill="#FDF6E3" stroke="#000000" stroke-width="2.5" paint-order="stroke">anchor</text>
                 </g>
 
-                <!-- steaming: forward beam -->
                 <g class="ov-light" data-light="steam" data-color="#FDF6E3">
                   <path d="M342.7,302.3 L408.8,261.0 A100,100 0 0,1 408.8,367.0 L342.7,325.7 A22,22 0 0,0 342.7,302.3 Z" fill="transparent"/>
                   <path class="ov-glow" d="M324,314 L408.8,261.0 A100,100 0 0,1 408.8,367.0 Z" fill="url(#ovSteamBeam)"/>
                   <text x="337" y="311" fill="#FDF6E3" stroke="#000000" stroke-width="2.5" paint-order="stroke">steaming</text>
                 </g>
 
-                <!-- deck: downward floodlight beam -->
                 <g class="ov-light" data-light="deck" data-color="#FDF6E3">
                   <path d="M342.7,325.7 L434.2,382.9 A130,130 0 0,1 328.5,443.9 L324.8,336.0 A22,22 0 0,0 342.7,325.7 Z" fill="transparent"/>
                   <path class="ov-glow" d="M324,314 L434.2,382.9 A130,130 0 0,1 328.5,443.9 Z" fill="url(#ovDeckBeam)"/>
                   <text x="337" y="326" fill="#FDF6E3" stroke="#000000" stroke-width="2.5" paint-order="stroke" font-size="9">deck</text>
                 </g>
 
-                <!-- shared fixture housing for steam+deck -->
                 <circle id="ovFixtureSteamDeck" cx="324" cy="314" r="4.5" fill="#4A4A3E" stroke="#C99A4B" stroke-width="1.5"/>
 
-                <!-- port: red, bow. Its glow is #ovPortGlow, drawn under the hull. -->
                 <g class="ov-light" data-light="port" data-color="#E24B42" data-external-glow="ovPortGlow">
                   <circle cx="417" cy="553" r="16" fill="transparent"/>
                 </g>
 
-                <!-- starboard: green, bow -->
                 <g class="ov-light" data-light="stbd" data-color="#3FBF74">
                   <circle cx="417" cy="571" r="16" fill="transparent"/>
                   <circle class="ov-glow" cx="417" cy="571" r="14" fill="#3FBF74" fill-opacity="0.3"/>
                   <circle class="ov-dot" cx="417" cy="571" r="4.5" fill="#1a5c34" stroke="#1a5c34" stroke-width="1.5"/>
                 </g>
 
-                <!-- stern: white, facing aft -->
                 <g class="ov-light" data-light="stern" data-color="#FDF6E3">
                   <path d="M109,570 L39.7,610.0 A80,80 0 0,1 39.7,530.0 Z" fill="transparent"/>
                   <path class="ov-glow" d="M109,570 L39.7,610.0 A80,80 0 0,1 39.7,530.0 Z" fill="url(#ovSternBeam)"/>
@@ -623,31 +584,16 @@
                 </g>
               </g>
 
-              <!-- Interior readings, painted inside the white hull like
-                   labels on a deck plan. Each group is hidden outright when
-                   its sensor has no value, rather than showing a dash. -->
-              <!-- Cabin is left-aligned, not centred like the other two: its
-                   value is the only one whose width moves (humidity digits
-                   come and go), and centring would slide the whole block
-                   around under the fridge's fixed one. -->
               <g id="ov-cabin" display="none">
-                <text x="273" y="583" font-size="11" font-weight="bold" fill="#000000">CABIN</text>
-                <text id="ov-cabin-value" x="273" y="602" xml:space="preserve" font-size="16" font-weight="bold" fill="#000000"></text>
-              </g>
-              <g id="ov-fridge" display="none">
-                <text x="226" y="583" text-anchor="middle" font-size="11" font-weight="bold" fill="#000000">FRIDGE</text>
-                <text id="ov-fridge-value" x="226" y="602" text-anchor="middle" font-size="16" font-weight="bold" fill="#000000"></text>
+                <path id="ov-cabin-drop" d="M0,-9 C0,-9 -7,-3 -7,2 A7,7 0 0 0 7,2 C7,-3 0,-9 0,-9 Z" fill="#3FA9D6" display="none"/>
+                <text id="ov-cabin-text" x="276" y="606" text-anchor="middle" xml:space="preserve" font-size="20" font-weight="bold" fill="#000000"><tspan id="ov-cabin-value"></tspan><tspan id="ov-cabin-pct" dx="22" dy="-2" font-size="14"></tspan><tspan id="ov-cabin-rh" dx="5" dy="2"></tspan></text>
               </g>
 
-              <!-- Sea temperature, in the water forward of the keel -- the
-                   one reading here that belongs outside the boat, so it's
-                   labelled like the interior ones but takes the water
-                   colour. Hidden unless the instruments are actually
-                   feeding it; see showSeaTemperature(). -->
               <g id="ov-sea" display="none">
-                <text class="ov-sea-label" x="390" y="645" text-anchor="middle" font-size="11" font-weight="bold">SEA</text>
-                <text id="ov-sea-value" class="ov-sea-value" x="390" y="664" text-anchor="middle" font-size="16" font-weight="bold"></text>
+                <text class="ov-sea-label" x="390" y="645" text-anchor="middle" font-size="13" font-weight="bold">SEA</text>
+                <text id="ov-sea-value" class="ov-sea-value" x="390" y="667" text-anchor="middle" font-size="20" font-weight="bold"></text>
               </g>
+
             </svg>
           </div>
         </div>
@@ -993,6 +939,7 @@
     // includes tank-settings (a sub-view, not one of SWIPE_VIEWS) since it
     // shows the gauge too.
     const TANK_GAUGE_MOUNTS = {
+      overview: 'fresh-cyl-ov',
       essentials: 'fresh-cyl-es',
       control: 'fresh-cyl-sb',
       sensors: 'fresh-cyl-sn',
@@ -1027,6 +974,7 @@
     let currentView = 'essentials';
     // Set when renderPower() skipped an off-screen diagram; showView() redraws it.
     let powerStale = false;
+    let controlStale = false; // relay widgets on hidden pages need a redraw
 
     function showView(name) {
       // A gated page's pane is detached from the document while Signal K is
@@ -1046,6 +994,7 @@
       // that's about to change height.
       document.body.classList.toggle('overview-active', name === 'overview');
       if (powerStale && (name === 'power' || name === 'overview')) renderPower(lastElectrical);
+      if (controlStale) renderControl(lastStatus);
       if (name === 'overview') syncOverviewLayout();
       const isMain = SWIPE_VIEWS.includes(name);
       const wasMainActive = swipeViewport.classList.contains('active');
@@ -1100,63 +1049,51 @@
     // with no resize event to correct it.
     window.addEventListener('load', resyncLayout);
 
-    // -- Overview sizing. This Chromium can't derive an <svg>'s height from
-    // its viewBox plus a width, so both dimensions are set explicitly here
-    // rather than in CSS.
-    //
-    // Full pane, wedge layout: the boat runs the height of the viewport
-    // (it starts level with the top of the nav, which it overlaps, and
-    // stops a pane-padding short of the bottom), leaving the upper-left
-    // wedge beside the rig for the power diagram and tank bars. Capped at
-    // 62% of the pane so the column keeps a usable width when the
-    // autopilot pane is expanded (642px -> ~236px of column).
-    // Stacked layout (<620px): boat full width, everything below it, body
-    // scrolls.
-    const BOAT_ASPECT = 440 / 605; // .ov-boat svg viewBox width/height
-    const OV_DIAGRAM_ASPECT = 400 / 300; // shared power-diagram viewBox
-    const OV_MIN_COL = 300; // px of data column to protect before shrinking the boat
+    // -- Overview sizing (this Chromium can't size an <svg> from viewBox + width).
+    // Side by side: boat full height, right-aligned. Stacked (<620px): full width, body scrolls.
+    const BOAT_VB_W = 385, BOAT_ASPECT = 385 / 622;
+    const BOAT_DIM_X = 460, BOAT_VB_RIGHT = 97 + 385;
     function syncOverviewLayout() {
       const boat = document.getElementById('ov-boat-svg');
-      if (!boat) return; // pane detached from the document -- Signal K is off
-      const wrap = boat.closest('.ov-wrap');
+      if (!boat) return; // pane detached -- Signal K is off
+      const box = boat.parentElement;
+      const wrap = box.closest('.ov-wrap');
       const avail = wrap.clientWidth || window.innerWidth;
-      const stacked = window.innerWidth < 620;
-      let w, h;
-      if (stacked) {
-        w = avail;
-        h = w / BOAT_ASPECT;
-      } else {
-        h = Math.max(240, window.innerHeight - 32);
-        w = h * BOAT_ASPECT;
-        // Reserve a usable column rather than capping the boat at a fraction
-        // of the pane: the boat's aspect ratio means its height buys width
-        // directly out of the column, and below ~300px the diagram's labels
-        // stop being readable. The data is the point of the page; the boat is
-        // context, so it yields first.
-        const maxW = Math.max(200, avail - OV_MIN_COL - 12);
-        if (w > maxW) { w = maxW; h = w / BOAT_ASPECT; }
-      }
+      const stacked = getComputedStyle(wrap).display !== 'flex';
+      let w = stacked ? avail : Math.min(Math.max(240, window.innerHeight - 32) * BOAT_ASPECT, avail);
+      const h = w / BOAT_ASPECT;
       boat.style.width = `${Math.round(w)}px`;
       boat.style.height = `${Math.round(h)}px`;
-      // The boat is pulled up by --nav-h to overlap the header, so it sticks
-      // out of the flex line by that much at the top and its real extent is
-      // (h - navH) below the pane's top edge. syncSwipeHeight() sizes the
-      // clipping viewport from the pane, so the pane has to be told to
-      // account for it -- otherwise a boat taller than the data column gets
-      // its keel clipped off.
-      // On .ov-wrap, not the pane: panes are border-box, so a min-height
-      // there would have the pane's own 16px padding eaten out of it and the
-      // keel would still lose that much.
-      const navH = navEl.offsetHeight;
-      wrap.style.minHeight = stacked ? '' : `${Math.round(h - navH)}px`;
-
-      const diagram = document.getElementById('ov-diagram');
-      if (diagram) {
-        const colW = stacked ? avail : Math.max(160, avail - w - 12);
-        const dw = Math.min(colW, 460);
-        diagram.style.width = `${Math.round(dw)}px`;
-        diagram.style.height = `${Math.round(dw / OV_DIAGRAM_ASPECT)}px`;
+      box.style.height = `${Math.round(h)}px`;
+      box.style.marginLeft = 'auto';
+      wrap.style.minHeight = stacked ? '' : `${Math.round(h - navEl.offsetHeight)}px`;
+      // Keep the height-dimension line clear of the nav's right arrow.
+      let marginRight = 0;
+      if (!stacked) {
+        const gapRight = document.documentElement.clientWidth - wrap.getBoundingClientRect().right;
+        marginRight = Math.max(0, Math.ceil(navNext.offsetWidth + 6 - gapRight - (BOAT_VB_RIGHT - BOAT_DIM_X) * w / BOAT_VB_W));
       }
+      box.style.marginRight = `${marginRight}px`;
+      placeOverviewTanks(box, wrap, w, stacked);
+    }
+
+    // Side by side: between the buttons and 42% into the boat, never over the buttons,
+    // level with the first button. Stacked: at the left edge.
+    function placeOverviewTanks(box, wrap, w, stacked) {
+      const overlay = box.querySelector('.ov-overlay');
+      const buttons = document.getElementById('ov-essentials');
+      const boatRect = box.getBoundingClientRect();
+      const buttonsRight = buttons.getBoundingClientRect().right;
+      let left = wrap.getBoundingClientRect().left;
+      let top = 80;
+      if (!stacked && buttonsRight <= boatRect.left) {
+        const mid = (buttonsRight + boatRect.left + w * 0.42) / 2 - 30;
+        left = Math.max(mid - overlay.offsetWidth / 2, buttonsRight + 8);
+        top = Math.round((buttons.querySelector('button') || buttons).getBoundingClientRect().top - boatRect.top);
+      }
+      overlay.style.left = `${Math.round(left - boatRect.left)}px`;
+      overlay.style.top = `${top}px`;
+      overlay.style.maxHeight = `calc(100% - ${top}px)`;
     }
 
     // -- swipe left/right between the main pages, like the Victron app's
@@ -1666,6 +1603,25 @@
 
     // Essentials: a small curated/relabeled subset, not tied to Config's
     // per-circuit visibility (that only governs the All Controls tab).
+    // Overview's buttons: Essentials' five plus Compass light.
+    const OVERVIEW_BUTTONS = [
+      ['Anchor light', 'LANTERN_MASTHEAD'], ['Steaming light', 'LANTERN_STEAM'], ['Deck light', 'DECK_LIGHT'],
+      ['Cockpit outlet', 'F5'], ['Compass light', 'COMPASS_LIGHT'],
+    ];
+    function renderOverviewButtons(status) {
+      const container = document.getElementById('ov-essentials');
+      if (!container) return;
+      const c = status.electrical.switches;
+      const navOn = c.LANTERN_BOW.state && c.LANTERN_AFT.state;
+      const firstRender = !container.firstChild;
+      container.innerHTML = '';
+      container.appendChild(makeCircuitButton('Navigation lights', navOn, () => setNavigationLights(!navOn)));
+      for (const [label, name] of OVERVIEW_BUTTONS) {
+        container.appendChild(makeCircuitButton(label, c[name].state, () => setCircuit(name, !c[name].state)));
+      }
+      if (firstRender) syncOverviewLayout(); // the tank panel aligns with the first button
+    }
+
     function renderEssentials(status) {
       const c = status.electrical.switches;
       const container = document.getElementById('essentials-circuits');
@@ -1732,30 +1688,32 @@
 
     function renderControl(status) {
       lastStatus = status;
-      renderOverviewLights(status);
+      // Relays on the visible page first; other pages are redrawn by showView() when shown.
+      if (currentView === 'overview') {
+        renderOverviewLights(status);
+        renderOverviewButtons(status);
+      } else if (currentView === 'essentials') {
+        renderEssentials(status);
+      } else if (currentView === 'control') {
+        const container = document.getElementById('circuits');
+        container.innerHTML = '';
+        for (const [name, sw] of Object.entries(status.electrical.switches)) {
+          if (!isVisible(name)) continue;
+          const on = sw.state;
+          container.appendChild(makeCircuitButton(name, on, () => setCircuit(name, !on)));
+        }
+        syncActiveSwipeHeight(); // circuit visibility/count can change the active pane's height
+      }
+      controlStale = true;
 
       const summary = `state: ${status.state} | streaming: ${status.streaming}`;
       const hasIssue = status.state !== 'OPERATIONAL' || !status.streaming;
       setStateLine('state', hasIssue ? summary : '');
       setStateLine('essentials-state', hasIssue ? summary : '');
-
       const circuitsSummary = Object.entries(status.electrical.switches)
         .map(([name, sw]) => `${name}: ${sw.state ? 'ON' : 'OFF'}`).join(', ');
       document.getElementById('diag-status').textContent = `${summary} — ${circuitsSummary}`;
-
-      renderEssentials(status);
-
-      const names = Object.keys(status.electrical.switches);
-      renderConfigOnce(names);
-
-      const container = document.getElementById('circuits');
-      container.innerHTML = '';
-      for (const [name, sw] of Object.entries(status.electrical.switches)) {
-        if (!isVisible(name)) continue;
-        const on = sw.state;
-        container.appendChild(makeCircuitButton(name, on, () => setCircuit(name, !on)));
-      }
-      syncActiveSwipeHeight(); // circuit visibility/count can change the active pane's height
+      renderConfigOnce(Object.keys(status.electrical.switches));
     }
 
     // -- sensors sidebar: subscribes over the same WebSocket as switches,
@@ -2438,26 +2396,17 @@
         const batteryMount = document.getElementById('power-battery');
         if (batteryMount.firstChild) batteryMount.innerHTML = '';
       }
-      if (onOverview) renderOverviewPower(f);
+      if (onOverview) renderOverviewData(f);
     }
 
-    // The Overview shows the diagram alone -- the per-instance detail rows
-    // stay on the Power page, where there's room for them.
-    function renderOverviewPower(f) {
-      const mount = document.getElementById('ov-power');
-      if (!mount) return;
-      if (patchHtml(mount, powerDiagramSvg(f, 'ov-diagram')) !== 'replaced') return;
-      // The <svg> is new every time and carries no intrinsic size (this
-      // Chromium won't derive one from viewBox), so it has to be measured
-      // back in or it renders at the default 300x150. Only while Overview
-      // is actually on screen, though: syncOverviewLayout() reads layout,
-      // and this runs on every electrical delta -- forcing a reflow several
-      // times a second behind another page would be pure waste. showView()
-      // sizes it on the way in.
-      if (document.body.classList.contains('overview-active')) {
-        syncOverviewLayout();
-        syncActiveSwipeHeight(); // stacked layout puts the column above the boat, so this changes the pane's height
-      }
+    function renderOverviewData(f) {
+      setText('ov-data-soc', `${f.soc.toFixed(0)}%`);
+      setText('ov-data-power', `${signed(f.battPower, 0)} W`);
+    }
+
+    function setText(id, text) {
+      const el = document.getElementById(id);
+      if (el && el.textContent !== text) el.textContent = text;
     }
 
     // -- Overview interior readings: cabin + fridge, painted inside the
@@ -2509,24 +2458,29 @@
       if (cabinT === null) {
         cabinGroup.setAttribute('display', 'none');
       } else {
-        // Signal K units: temperature in kelvin, humidity as a 0-1 ratio.
-        // Joined with plain spaces (the <text> carries xml:space="preserve",
-        // so the run survives) rather than a separator dot -- "RH" labels the
-        // second figure and keeps the two apart on its own.
-        const parts = [`${(cabinT - 273.15).toFixed(1)}°C`];
-        if (cabinRh !== null) parts.push(`${Math.round(cabinRh * 100)}% RH`);
-        document.getElementById('ov-cabin-value').textContent = parts.join('  ');
+        // Signal K units: kelvin, humidity as a 0-1 ratio.
+        setText('ov-cabin-value', `${(cabinT - 273.15).toFixed(1)}°C`);
+        setText('ov-cabin-pct', cabinRh === null ? '' : '%');
+        setText('ov-cabin-rh', cabinRh === null ? '' : `${Math.round(cabinRh * 100)}%`);
         cabinGroup.setAttribute('display', 'inline');
+        placeCabinDrop(cabinRh !== null);
       }
-
-      const fridgeGroup = document.getElementById('ov-fridge');
       const fridgeT = envNumber(envZone(env, OV_ENV_ZONES.fridge), ['temperature']);
-      if (fridgeT === null) {
-        fridgeGroup.setAttribute('display', 'none');
-      } else {
-        document.getElementById('ov-fridge-value').textContent = `${(fridgeT - 273.15).toFixed(1)}°C`;
-        fridgeGroup.setAttribute('display', 'inline');
-      }
+      setText('ov-data-fridge', fridgeT === null ? '\u2014' : `${(fridgeT - 273.15).toFixed(1)}°C`);
+    }
+
+    // Droplet behind the small "%" before the humidity figure.
+    function placeCabinDrop(show) {
+      const drop = document.getElementById('ov-cabin-drop');
+      drop.setAttribute('display', show ? 'inline' : 'none');
+      if (!show) return;
+      const text = document.getElementById('ov-cabin-text');
+      const pct = document.getElementById('ov-cabin-pct');
+      const fs = Number(pct.getAttribute('font-size'));
+      const baseline = Number(text.getAttribute('y')) + Number(pct.getAttribute('dy'));
+      const box = text.getExtentOfChar(document.getElementById('ov-cabin-value').getNumberOfChars());
+      const scale = 0.55 * fs / 7;
+      drop.setAttribute('transform', `translate(${(box.x + box.width / 2).toFixed(1)},${(baseline - 0.36 * fs - 2 * scale).toFixed(1)}) scale(${scale.toFixed(3)})`);
     }
 
     // -- Overview sea temperature. Unlike cabin/fridge (BLE sensors on the
@@ -2690,22 +2644,23 @@
         }
         if (updateTs > newestSignalkTs) newestSignalkTs = updateTs;
       }
-      pendingRender.status = pendingRender.status || statusChanged;
+      if (statusChanged) renderControl(lastStatus); // relay changes are rare: show them at once
       pendingRender.sensors = pendingRender.sensors || sensorsChanged;
       pendingRender.electrical = pendingRender.electrical || electricalChanged;
       pendingRender.environment = pendingRender.environment || environmentChanged;
-      if (!renderTimer) renderTimer = setTimeout(flushRenders, RENDER_BATCH_MS);
+      if (!renderTimer && (sensorsChanged || electricalChanged || environmentChanged)) {
+        renderTimer = setTimeout(flushRenders, RENDER_BATCH_MS);
+      }
     }
 
     // Batch delta renders: one pass per RENDER_BATCH_MS (per-message renders cost ~300 ms on the MFD).
-    const RENDER_BATCH_MS = 250;
-    const pendingRender = { status: false, sensors: false, electrical: false, environment: false };
+    const RENDER_BATCH_MS = 100;
+    const pendingRender = { sensors: false, electrical: false, environment: false };
     let renderTimer = null;
     function flushRenders() {
       renderTimer = null;
       const p = Object.assign({}, pendingRender);
-      pendingRender.status = pendingRender.sensors = pendingRender.electrical = pendingRender.environment = false;
-      if (p.status) renderControl(lastStatus);
+      pendingRender.sensors = pendingRender.electrical = pendingRender.environment = false;
       if (p.sensors) renderSensors(lastSensors);
       if (p.electrical) renderPower(lastElectrical);
       if (p.environment) renderOverviewEnv(lastEnvironment);
