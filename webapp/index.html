@@ -1,6 +1,11 @@
 <!DOCTYPE html>
 <html lang="en">
 <script>
+  // The MFD appends its own query params (mfd_name, mfd_model_detail,
+  // mode, ...) to the app URL; html.mfd switches on plotter-only
+  // performance trade-offs in the CSS below. ?mfd forces it for testing.
+  if (/[?&](mfd_name=|mfd(&|$))/.test(location.search)) document.documentElement.classList.add('mfd');
+
   if ('serviceWorker' in navigator) {
     navigator.serviceWorker.register('/sw.js')
       .then(() => console.log('Service Worker registered'))
@@ -360,6 +365,13 @@
     .arrow-inactive { stroke: var(--text-secondary); stroke-width: 2; opacity: 0.3; }
     @keyframes flow { 0% { stroke-dashoffset: 0; } 100% { stroke-dashoffset: -8px; } }
     .arrow-flowing { animation: flow 0.8s linear infinite; stroke-dasharray: 4, 4; }
+    /* MFD: dashed but static. The endless dash animation repaints every
+       frame and kept the plotter's main thread ~45% busy (measured). */
+    html.mfd .arrow-flowing { animation: none; }
+    /* MFD: the plotter's own UI font (installed in its /usr/share/fonts),
+       so the ~1 MB DejaVu web fonts are never fetched or decoded there
+       (measured: load ~3 s faster even with them cached). */
+    html.mfd * { font-family: 'Handset Condensed', sans-serif !important; }
 
     /* -- Overview page --------------------------------------------------
        The rig is a triangle with the mast ~70% across the artwork, so the
@@ -916,7 +928,11 @@
       SWIPE_VIEWS = computeSwipeViews();
       syncGatedPanesDOM();
       const current = location.hash.slice(1) || 'essentials';
-      if (SIGNALK_GATED.indexOf(current) !== -1 && !signalkEnabled) {
+      // Only bump the hash if the gated page is actually on screen (Signal K
+      // switched off while viewing it). At startup the URL cache can be empty
+      // (e.g. on the MFD) and Signal K only turns on once seedConfigFromServer()
+      // answers -- rewriting the hash then lost deep links like #power.
+      if (SIGNALK_GATED.indexOf(current) !== -1 && !signalkEnabled && currentView === current) {
         location.hash = 'essentials'; // hashchange -> showView; the page just vanished from under the viewer
       } else {
         showView(current);
@@ -1017,6 +1033,13 @@
       return true;
     }
 
+    // Which view showView() last put on screen -- lets renders for pages
+    // that aren't visible be skipped (and redone on the way in).
+    let currentView = 'essentials';
+    // True when renderPower() skipped the Power page and/or Overview
+    // diagram because it wasn't on screen.
+    let powerStale = false;
+
     function showView(name) {
       // A gated page's pane is detached from the document while Signal K is
       // off (syncGatedPanesDOM), so a hash pointing at one -- a deep link, or
@@ -1026,6 +1049,7 @@
       // script down with it. Fall back until it becomes available; the later
       // updateSwipeViews() re-runs showView() with the hash still intact.
       if (!isValidView(name)) name = 'essentials';
+      currentView = name;
       rememberView(name);
       if (TANK_GAUGE_MOUNTS[name]) moveTankGaugeTo(TANK_GAUGE_MOUNTS[name]);
       // Both before setSwipeIndex(): the body class shifts the viewport up
@@ -1033,6 +1057,7 @@
       // one after the fact would leave syncSwipeHeight() measuring a pane
       // that's about to change height.
       document.body.classList.toggle('overview-active', name === 'overview');
+      if (powerStale && (name === 'power' || name === 'overview')) renderPower(lastElectrical);
       if (name === 'overview') syncOverviewLayout();
       const isMain = SWIPE_VIEWS.includes(name);
       const wasMainActive = swipeViewport.classList.contains('active');
@@ -2312,8 +2337,66 @@
       `;
     }
 
+    // Writes `html` into `mount` touching as little of the live DOM as
+    // possible: nothing if it's identical to the last write; otherwise the
+    // markup is parsed off-page and only changed text/attributes are copied
+    // onto the existing nodes. Falls back to replacing the children when
+    // the element structure differs. Existing `style` attributes are kept
+    // (syncOverviewLayout() sizes the Overview <svg> that way).
+    // Returns 'unchanged' | 'patched' | 'replaced'.
+    function patchHtml(mount, html) {
+      if (mount.__lastHtml === html) return 'unchanged';
+      const fresh = document.createElement('div');
+      fresh.innerHTML = html;
+      const first = mount.__lastHtml === undefined;
+      mount.__lastHtml = html;
+      if (first || !sameShape(mount, fresh)) {
+        while (mount.firstChild) mount.removeChild(mount.firstChild);
+        while (fresh.firstChild) mount.appendChild(fresh.firstChild);
+        return 'replaced';
+      }
+      copyChanges(mount, fresh);
+      return 'patched';
+    }
+
+    function sameShape(a, b) {
+      const ak = a.childNodes, bk = b.childNodes;
+      if (ak.length !== bk.length) return false;
+      for (let i = 0; i < ak.length; i++) {
+        if (ak[i].nodeName !== bk[i].nodeName || !sameShape(ak[i], bk[i])) return false;
+      }
+      return true;
+    }
+
+    function copyChanges(a, b) {
+      const ak = a.childNodes, bk = b.childNodes;
+      for (let i = 0; i < ak.length; i++) {
+        const x = ak[i], y = bk[i];
+        if (x.nodeType !== 1) {
+          if (x.nodeValue !== y.nodeValue) x.nodeValue = y.nodeValue;
+          continue;
+        }
+        for (let j = 0; j < y.attributes.length; j++) {
+          const at = y.attributes[j];
+          if (x.getAttribute(at.name) !== at.value) x.setAttribute(at.name, at.value);
+        }
+        for (let j = x.attributes.length - 1; j >= 0; j--) {
+          const name = x.attributes[j].name;
+          if (name !== 'style' && !y.hasAttribute(name)) x.removeAttribute(name);
+        }
+        copyChanges(x, y);
+      }
+    }
+
     function renderPower(data) {
       lastElectrical = data;
+      // Only build what's on screen; the rest is redrawn by showView() on
+      // the way in. Rebuilding off-screen diagrams every second kept the
+      // MFD ~50% busy on Essentials (measured).
+      const onPower = currentView === 'power';
+      const onOverview = currentView === 'overview';
+      powerStale = !onPower || !onOverview;
+      if (!onPower && !onOverview) return;
       const f = computePowerFigures(data.electrical);
       const solarList = f.solarList;
       const chargerCurrent = f.chargerCurrent;
@@ -2371,11 +2454,12 @@
       // Both panes are detached from the document while Signal K is off
       // (syncGatedPanesDOM), so neither mount is guaranteed to exist.
       const solarMount = document.getElementById('power-solar');
-      if (solarMount) {
-        solarMount.innerHTML = detailedHtml;
-        document.getElementById('power-battery').innerHTML = '';
+      if (onPower && solarMount) {
+        patchHtml(solarMount, detailedHtml);
+        const batteryMount = document.getElementById('power-battery');
+        if (batteryMount.firstChild) batteryMount.innerHTML = '';
       }
-      renderOverviewPower(f);
+      if (onOverview) renderOverviewPower(f);
     }
 
     // The Overview shows the diagram alone -- the per-instance detail rows
@@ -2383,7 +2467,9 @@
     function renderOverviewPower(f) {
       const mount = document.getElementById('ov-power');
       if (!mount) return;
-      mount.innerHTML = powerDiagramSvg(f, 'ov-diagram');
+      // Only a full replacement loses the <svg>'s measured size; patched
+      // or unchanged diagrams keep it.
+      if (patchHtml(mount, powerDiagramSvg(f, 'ov-diagram')) !== 'replaced') return;
       // The <svg> is new every time and carries no intrinsic size (this
       // Chromium won't derive one from viewBox), so it has to be measured
       // back in or it renders at the default 300x150. Only while Overview
@@ -2628,10 +2714,27 @@
           // REST fetch below will supersede it moments later regardless.
         }
       }
-      if (statusChanged) renderControl(lastStatus);
-      if (sensorsChanged) renderSensors(lastSensors);
-      if (electricalChanged) renderPower(lastElectrical);
-      if (environmentChanged) renderOverviewEnv(lastEnvironment);
+      pendingRender.status = pendingRender.status || statusChanged;
+      pendingRender.sensors = pendingRender.sensors || sensorsChanged;
+      pendingRender.electrical = pendingRender.electrical || electricalChanged;
+      pendingRender.environment = pendingRender.environment || environmentChanged;
+      if (!renderTimer) renderTimer = setTimeout(flushRenders, RENDER_BATCH_MS);
+    }
+
+    // Deltas arrive in bursts (Signal K sends each path as its own message);
+    // re-rendering per message cost ~300 ms each on the MFD, so renders are
+    // batched to at most one pass per RENDER_BATCH_MS.
+    const RENDER_BATCH_MS = 250;
+    const pendingRender = { status: false, sensors: false, electrical: false, environment: false };
+    let renderTimer = null;
+    function flushRenders() {
+      renderTimer = null;
+      const p = Object.assign({}, pendingRender);
+      pendingRender.status = pendingRender.sensors = pendingRender.electrical = pendingRender.environment = false;
+      if (p.status) renderControl(lastStatus);
+      if (p.sensors) renderSensors(lastSensors);
+      if (p.electrical) renderPower(lastElectrical);
+      if (p.environment) renderOverviewEnv(lastEnvironment);
     }
 
     const RECONNECT_MS = 1000;
@@ -2666,13 +2769,27 @@
         setTimeout(connectSubscribe, RECONNECT_MS);
       };
     }
+    const SIGNALK_SUBSCRIPTIONS = [
+      { path: 'electrical.batteries.*', policy: 'instant', minPeriod: 1000 },
+      { path: 'electrical.solar.*', policy: 'instant', minPeriod: 1000 },
+      { path: 'tanks.*', policy: 'instant', minPeriod: 1000 },
+      { path: 'environment.inside.*', policy: 'instant', minPeriod: 5000 },
+      { path: 'environment.water.temperature', policy: 'instant', minPeriod: 5000 },
+    ];
+
     function connectSignalKSubscribe() {
       try {
         const base = signalkBaseUrl();
         const proto = base.startsWith('https') ? 'wss:' : 'ws:';
         const host = base.replace(/^https?:\/\//, '').replace(':3000', '');
-        const ws = new WebSocket(`${proto}//${host}:3000/signalk/v1/stream?subscribe=electrical.*,tanks.*,environment.*`);
-        ws.onopen = () => {};
+        // subscribe=none, then ask for just what the app renders, rate-
+        // limited per path. The old ?subscribe=electrical.*,... form isn't a
+        // valid value, so the server fell back to sending everything --
+        // ~190 messages / 76 KB per second (navigation, wind, raw sensors).
+        const ws = new WebSocket(`${proto}//${host}:3000/signalk/v1/stream?subscribe=none`);
+        ws.onopen = () => {
+          ws.send(JSON.stringify({ context: 'vessels.self', subscribe: SIGNALK_SUBSCRIPTIONS }));
+        };
         ws.onmessage = (msg) => {
           try {
             const delta = JSON.parse(msg.data);
