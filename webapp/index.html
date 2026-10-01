@@ -1,9 +1,7 @@
 <!DOCTYPE html>
 <html lang="en">
 <script>
-  // The MFD appends its own query params (mfd_name, mfd_model_detail,
-  // mode, ...) to the app URL; html.mfd switches on plotter-only
-  // performance trade-offs in the CSS below. ?mfd forces it for testing.
+  // MFD adds mfd_name etc. to the URL; html.mfd enables plotter-only CSS (?mfd forces it).
   if (/[?&](mfd_name=|mfd(&|$))/.test(location.search)) document.documentElement.classList.add('mfd');
 
   if ('serviceWorker' in navigator) {
@@ -365,12 +363,8 @@
     .arrow-inactive { stroke: var(--text-secondary); stroke-width: 2; opacity: 0.3; }
     @keyframes flow { 0% { stroke-dashoffset: 0; } 100% { stroke-dashoffset: -8px; } }
     .arrow-flowing { animation: flow 0.8s linear infinite; stroke-dasharray: 4, 4; }
-    /* MFD: dashed but static. The endless dash animation repaints every
-       frame and kept the plotter's main thread ~45% busy (measured). */
+    /* MFD: static arrows (animation cost ~45% CPU) and the plotter's own font. */
     html.mfd .arrow-flowing { animation: none; }
-    /* MFD: the plotter's own UI font (installed in its /usr/share/fonts),
-       so the ~1 MB DejaVu web fonts are never fetched or decoded there
-       (measured: load ~3 s faster even with them cached). */
     html.mfd * { font-family: 'Handset Condensed', sans-serif !important; }
 
     /* -- Overview page --------------------------------------------------
@@ -928,10 +922,7 @@
       SWIPE_VIEWS = computeSwipeViews();
       syncGatedPanesDOM();
       const current = location.hash.slice(1) || 'essentials';
-      // Only bump the hash if the gated page is actually on screen (Signal K
-      // switched off while viewing it). At startup the URL cache can be empty
-      // (e.g. on the MFD) and Signal K only turns on once seedConfigFromServer()
-      // answers -- rewriting the hash then lost deep links like #power.
+      // Only bump the hash if that page is on screen; at startup Signal K may not be enabled yet.
       if (SIGNALK_GATED.indexOf(current) !== -1 && !signalkEnabled && currentView === current) {
         location.hash = 'essentials'; // hashchange -> showView; the page just vanished from under the viewer
       } else {
@@ -1033,11 +1024,8 @@
       return true;
     }
 
-    // Which view showView() last put on screen -- lets renders for pages
-    // that aren't visible be skipped (and redone on the way in).
     let currentView = 'essentials';
-    // True when renderPower() skipped the Power page and/or Overview
-    // diagram because it wasn't on screen.
+    // Set when renderPower() skipped an off-screen diagram; showView() redraws it.
     let powerStale = false;
 
     function showView(name) {
@@ -2337,13 +2325,7 @@
       `;
     }
 
-    // Writes `html` into `mount` touching as little of the live DOM as
-    // possible: nothing if it's identical to the last write; otherwise the
-    // markup is parsed off-page and only changed text/attributes are copied
-    // onto the existing nodes. Falls back to replacing the children when
-    // the element structure differs. Existing `style` attributes are kept
-    // (syncOverviewLayout() sizes the Overview <svg> that way).
-    // Returns 'unchanged' | 'patched' | 'replaced'.
+    // Writes html into mount, copying only changed text/attributes (keeps style attrs).
     function patchHtml(mount, html) {
       if (mount.__lastHtml === html) return 'unchanged';
       const fresh = document.createElement('div');
@@ -2390,9 +2372,6 @@
 
     function renderPower(data) {
       lastElectrical = data;
-      // Only build what's on screen; the rest is redrawn by showView() on
-      // the way in. Rebuilding off-screen diagrams every second kept the
-      // MFD ~50% busy on Essentials (measured).
       const onPower = currentView === 'power';
       const onOverview = currentView === 'overview';
       powerStale = !onPower || !onOverview;
@@ -2467,8 +2446,6 @@
     function renderOverviewPower(f) {
       const mount = document.getElementById('ov-power');
       if (!mount) return;
-      // Only a full replacement loses the <svg>'s measured size; patched
-      // or unchanged diagrams keep it.
       if (patchHtml(mount, powerDiagramSvg(f, 'ov-diagram')) !== 'replaced') return;
       // The <svg> is new every time and carries no intrinsic size (this
       // Chromium won't derive one from viewBox), so it has to be measured
@@ -2566,15 +2543,7 @@
     // recently?" needs no clock at all. The feed runs ~3.5 Hz when live, so
     // even this tight a window can't flicker.
     //
-    // This leans on connectSignalKSubscribe()'s query string NOT replaying
-    // the last known value on connect -- verified 2026-09-14 with the
-    // instruments off: three fresh connections with our
-    // `?subscribe=electrical.*,tanks.*,environment.*` got zero water-
-    // temperature deltas, while `?subscribe=self` got exactly one, stamped
-    // minutes old. If that subscription is ever changed to a plain `self`,
-    // gate the show on the delta's own timestamp against the newest
-    // timestamp seen from the same server (never against Date.now()), or
-    // this will flash a stale reading on every page load.
+    // Signal K replays cached values on subscribe; applyDelta() drops stale water temps.
     const SEA_STALE_MS = 30000;
     let seaStaleTimer = null;
 
@@ -2652,12 +2621,17 @@
     // Applies electrical.switches.*, electrical.batteries.*, electrical.solar.*
     // and tanks.* deltas onto lastStatus/lastSensors/lastElectrical in place,
     // re-rendering whichever was actually touched by this message.
+    // Server-clock reference for sea-temp freshness (MFD clock has no NTP).
+    let newestSignalkTs = 0;
+    const SEA_FRESH_MS = 10000;
+
     function applyDelta(updates) {
       let statusChanged = false;
       let sensorsChanged = false;
       let electricalChanged = false;
       let environmentChanged = false;
       for (const update of updates) {
+        const updateTs = update.timestamp ? Date.parse(update.timestamp) : NaN;
         for (const { path, value } of update.values) {
           const sw = path.match(/^electrical\.switches\.(.+)\.state$/);
           if (sw && lastStatus && lastStatus.electrical.switches[sw[1]]) {
@@ -2687,7 +2661,8 @@
           // branch and outside it: that branch drops everything until the
           // REST snapshot has populated lastEnvironment, and this readout
           // is deliberately fed by deltas alone (see showSeaTemperature).
-          if (path === 'environment.water.temperature' && typeof value === 'number') {
+          if (path === 'environment.water.temperature' && typeof value === 'number'
+              && !isNaN(updateTs) && newestSignalkTs && newestSignalkTs - updateTs < SEA_FRESH_MS) {
             showSeaTemperature(value);
           }
           // environment.<zone>.<field> -- same walk-and-set as the solar/
@@ -2713,6 +2688,7 @@
           // else: delta arrived before its matching initial snapshot -- the
           // REST fetch below will supersede it moments later regardless.
         }
+        if (updateTs > newestSignalkTs) newestSignalkTs = updateTs;
       }
       pendingRender.status = pendingRender.status || statusChanged;
       pendingRender.sensors = pendingRender.sensors || sensorsChanged;
@@ -2721,9 +2697,7 @@
       if (!renderTimer) renderTimer = setTimeout(flushRenders, RENDER_BATCH_MS);
     }
 
-    // Deltas arrive in bursts (Signal K sends each path as its own message);
-    // re-rendering per message cost ~300 ms each on the MFD, so renders are
-    // batched to at most one pass per RENDER_BATCH_MS.
+    // Batch delta renders: one pass per RENDER_BATCH_MS (per-message renders cost ~300 ms on the MFD).
     const RENDER_BATCH_MS = 250;
     const pendingRender = { status: false, sensors: false, electrical: false, environment: false };
     let renderTimer = null;
@@ -2782,10 +2756,7 @@
         const base = signalkBaseUrl();
         const proto = base.startsWith('https') ? 'wss:' : 'ws:';
         const host = base.replace(/^https?:\/\//, '').replace(':3000', '');
-        // subscribe=none, then ask for just what the app renders, rate-
-        // limited per path. The old ?subscribe=electrical.*,... form isn't a
-        // valid value, so the server fell back to sending everything --
-        // ~190 messages / 76 KB per second (navigation, wind, raw sensors).
+        // ?subscribe=<paths> isn't valid and made Signal K send everything; subscribe explicitly.
         const ws = new WebSocket(`${proto}//${host}:3000/signalk/v1/stream?subscribe=none`);
         ws.onopen = () => {
           ws.send(JSON.stringify({ context: 'vessels.self', subscribe: SIGNALK_SUBSCRIPTIONS }));
