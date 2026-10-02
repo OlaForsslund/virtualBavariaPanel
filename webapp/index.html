@@ -137,6 +137,7 @@
          this class of embedded/older Chromium, and a plain 2-stop gradient
          looks identical either way. */
       background: linear-gradient(180deg, var(--surface-hover), var(--bg));
+      min-height: 100vh; /* else a short page shows the gradient restarting below the content */
       color: var(--text-primary);
     }
     #top-bar {
@@ -217,6 +218,10 @@
     }
     .view { display: none; padding: 16px; }
     .view.active { display: block; }
+    /* Same narrow case as above (Zeus3 quarter split): reclaim width. */
+    @media (max-width: 360px) {
+      #swipe-track > .pane, .view { padding: 8px; }
+    }
     /* Relay-button: on/off is carried by the LED dot plus a subtle background/shadow shift. */
     button.circuit {
       display: flex;
@@ -349,18 +354,24 @@
     #power-diagram {
       width: 100%;
       max-width: 400px;
-      height: 300px;
-      background: rgba(255, 17, 0, 0.05);
-      border-radius: 8px;
+      height: auto;
       margin-bottom: 20px;
       display: block;
     }
     .power-label { font-size: 1.05em; font-weight: bold; text-anchor: middle; }
-    .power-value { font-size: 0.95em; text-anchor: middle; }
+    .power-value, .power-amps { font-size: 0.95em; text-anchor: middle; }
     /* State of charge sits inside the battery icon, which carries no label
        of its own -- so it's the figure's title as well as its value. */
     .power-soc { font-size: 1.4em; font-weight: bold; text-anchor: middle; }
     .power-diagram { display: block; }
+    /* Wide single pane: details left, diagram right. */
+    @media (min-width: 620px) {
+      #power-solar { max-width: none; }
+      .power-cols { display: flex; gap: 24px; align-items: flex-start; justify-content: space-between; }
+      .power-details { order: -1; flex: 0 1 280px; min-width: 200px; }
+      .power-details > h4:first-child { margin-top: 0 !important; }
+      .power-cols #power-diagram { flex: 0 1 400px; min-width: 0; }
+    }
     .arrow-active { stroke: var(--brass); stroke-width: 3; }
     .arrow-inactive { stroke: var(--text-secondary); stroke-width: 2; opacity: 0.3; }
     @keyframes flow { 0% { stroke-dashoffset: 0; } 100% { stroke-dashoffset: -8px; } }
@@ -390,7 +401,7 @@
     .ov-boat { flex: 0 0 auto; position: relative; margin-top: calc(-1 * var(--nav-h, 48px)); pointer-events: none; }
     /* Sized by syncOverviewLayout() (no viewBox-based sizing in this Chromium). */
     .ov-boat svg { display: block; overflow: visible; }
-    .ov-overlay {
+    .ov-tanks {
       position: absolute; top: 80px; left: 0; width: 42%; max-height: calc(100% - 80px);
       overflow: hidden; box-sizing: border-box; padding: 8px;
       background: rgba(6, 24, 38, 0.62); border-radius: 10px; z-index: 1;
@@ -427,7 +438,8 @@
             </div>
           </div>
           <div class="ov-boat">
-            <div class="ov-overlay">
+            <div class="ov-tanks">
+              <div class="gauge-label">Freshwater</div>
               <div class="tank-cylinder-mount" id="fresh-cyl-ov"></div>
               <div class="gauge-value" id="ov-value-fresh">&mdash;</div>
               <div class="gauge">
@@ -782,6 +794,7 @@
     <p id="cal-tank-status"></p>
   </section>
 
+  <script src="/power-diagram.js"></script>
   <script>
     // -- nav: "<< PAGE >>" header + swipe, both driving the main pages
     // (SWIPE_VIEWS) on a sliding carousel track; drill-down sub-views
@@ -1080,7 +1093,7 @@
     // Side by side: between the buttons and 42% into the boat, never over the buttons,
     // level with the first button. Stacked: at the left edge.
     function placeOverviewTanks(box, wrap, w, stacked) {
-      const overlay = box.querySelector('.ov-overlay');
+      const overlay = box.querySelector('.ov-tanks');
       const buttons = document.getElementById('ov-essentials');
       const boatRect = box.getBoundingClientRect();
       const buttonsRight = buttons.getBoundingClientRect().right;
@@ -1702,8 +1715,8 @@
           const on = sw.state;
           container.appendChild(makeCircuitButton(name, on, () => setCircuit(name, !on)));
         }
-        syncActiveSwipeHeight(); // circuit visibility/count can change the active pane's height
       }
+      syncActiveSwipeHeight(); // the rebuilt buttons can change the visible pane's height
       controlStale = true;
 
       const summary = `state: ${status.state} | streaming: ${status.streaming}`;
@@ -2060,229 +2073,6 @@
       return n >= 0 ? `+${s}` : s;
     }
 
-    // Instance keys aren't fixed: the boat's Victron BLE integration uses
-    // '1'/'0', but Venus OS's own dbus->Signal K bridge assigns its own
-    // instance numbers (e.g. '256') -- discover instead of hardcoding.
-    // Shared by renderPower and the Config tab's "Test connection" button.
-    function pickElectricalInstances(elec) {
-      // Solar: every instance present, not just one -- a real multi-MPPT
-      // boat can have more than one charge controller, and Venus's own demo
-      // data does too. Object.keys() on numeric-string keys like "256"/"258"
-      // iterates in ascending numeric order regardless of insertion order,
-      // so this is deterministic.
-      const solarKeys = elec.solar ? Object.keys(elec.solar) : [];
-      // Batteries: multiple instances are normal (house, starter, hydropack,
-      // alternator-derived...). Prefer one named "house"; otherwise the first
-      // instance that actually has power data (excludes alternator-only
-      // entries and the "-second"-suffixed secondary-voltage-only taps).
-      const battKeys = elec.batteries ? Object.keys(elec.batteries) : [];
-      const battKey = battKeys.find(k => /house/i.test((elec.batteries[k].name || {}).value || ''))
-        || battKeys.find(k => elec.batteries[k].power);
-      return { solarKeys, battKey };
-    }
-
-    // Derived figures, computed once per update and rendered twice -- the
-    // Power page and the Overview draw the identical diagram, so the maths
-    // lives here rather than in either renderer.
-    function computePowerFigures(elec) {
-      const { solarKeys, battKey } = pickElectricalInstances(elec);
-      const solarList = solarKeys.map(k => elec.solar[k]);
-      const batt = battKey ? elec.batteries[battKey] : null;
-
-      // Prefer the battery-side "current" reading; some chargers (seen in
-      // Venus's own demo data) only publish "panelCurrent" (the panel-side
-      // reading, upstream of the MPPT conversion) instead -- not quite the
-      // same physical quantity, but the closest approximation available
-      // when the battery-side figure isn't published for that instance.
-      const solarInstanceCurrent = (s) => (s.current && s.current.value) || (s.panelCurrent && s.panelCurrent.value) || 0;
-      const solarInstancePower = (s) => (s.panelPower && s.panelPower.value) || 0;
-
-      // The controller's own load output -- a separate pair of terminals on
-      // the MPPT, NOT part of the boat's DC distribution, so it is emphatically
-      // not the LOAD node below. Here it feeds the always-on IP gear (router +
-      // Pi) directly off the controller.
-      //
-      // Unlike LOAD this is a real measurement (loadCurrent x the controller's
-      // own bus voltage), which is why it may honestly show a wattage. null --
-      // not 0 -- when no instance publishes loadCurrent at all, so a controller
-      // without the feature stays blank rather than claiming a measured zero.
-      // Prefer the published loadPower: it is the product of two fields from
-      // a single advertisement, so it is a true instantaneous figure. Fall
-      // back to loadCurrent x the controller's own bus voltage for sources
-      // that do not publish it.
-      const solarLoadWatts = solarList.reduce((sum, s) => {
-        const w = s.loadPower && s.loadPower.value;
-        if (typeof w === 'number') return (sum === null ? 0 : sum) + w;
-        const a = s.loadCurrent && s.loadCurrent.value;
-        if (typeof a !== 'number') return sum;
-        const v = (s.voltage && s.voltage.value) || 12;
-        return (sum === null ? 0 : sum) + a * v;
-      }, null);
-      const totalSolarCurrent = solarList.reduce((sum, s) => sum + solarInstanceCurrent(s), 0);
-
-      // Infer charger power: battery current - total solar current (summed
-      // across every solar instance). If positive, something other than
-      // solar is supplying power -- could be a land/shore charger, could be
-      // the engine alternator.
-      const battCurrent = (batt && batt.current && batt.current.value) || 0;
-      let chargerCurrent = battCurrent - totalSolarCurrent;
-      if (chargerCurrent < 2) chargerCurrent = 0; // 2 A deadband for chargers
-      const battVoltage = (batt && batt.voltage && batt.voltage.value) || 12;
-      const chargerPower = battVoltage * chargerCurrent;
-
-      // Load has no sensor of its own -- only battery and solar are actually
-      // measured (the charger figure above is already an inference, not a
-      // reading). A load *number* would be a further inference stacked on
-      // top of that inferred charger figure, compounding its error, so it's
-      // deliberately not shown -- only the direction/shape of the diagram
-      // (solar/charger feed the center, battery makes up the difference)
-      // reflects the "load" concept; no wattage is claimed for it.
-      const battPower = (batt && batt.power && batt.power.value) || 0;
-
-      // Victron's own convention (BMV/SmartShunt, confirmed against real
-      // hardware) is the opposite of the generic Signal K schema text:
-      // positive = charging (current into the battery), negative =
-      // discharging (current out) -- not "+ve out" as the spec description
-      // for electrical.batteries.*.current literally says.
-      const battDischarging = battCurrent < -0.5; // negative -- supplying the load's shortfall
-      const battCharging = battCurrent > 0.5;     // positive -- absorbing the load's surplus
-
-      return {
-        solarLoadWatts,
-        solarList, batt, battCurrent, battVoltage, battPower,
-        chargerCurrent, chargerPower, battDischarging, battCharging,
-        solarInstancePower, solarInstanceCurrent,
-        // Amp-hours taken out of the bank since it was last full, published
-        // in Ah and positive (bt-sensors reads the shunt's raw unsigned
-        // magnitude straight through). Sign is left exactly as published.
-        dischargeSinceFull: (batt && batt.capacity && batt.capacity.ampHoursConsumed && batt.capacity.ampHoursConsumed.value),
-        soc: ((batt && batt.capacity && batt.capacity.stateOfCharge && batt.capacity.stateOfCharge.value) || 0) * 100,
-        hoursRemaining: ((batt && batt.capacity && batt.capacity.timeRemaining && batt.capacity.timeRemaining.value) || 0) / 3600,
-      };
-    }
-
-    // One box per solar instance -- a single instance (the boat's real
-    // hardware, always exactly one) keeps the original box exactly as it
-    // was; multiple instances stack vertically in the same top-left
-    // region instead of being collapsed into one figure.
-    function solarBoxLayout(count) {
-      if (count <= 1) return [{ x: 12, y: 20, w: 76, h: 50 }];
-      const top = 5, bottom = 95, gap = 8;
-      const h = (bottom - top - gap * (count - 1)) / count;
-      return Array.from({ length: count }, (_, i) => ({ x: 10, w: 78, h, y: top + i * (h + gap) }));
-    }
-
-    // The diagram, drawn identically by the Power page and the Overview.
-    // `id` scopes the element *and* its arrowhead marker: both render into
-    // the same document, and a duplicate marker id would leave the second
-    // diagram's url(#...) references resolving to the first one's marker.
-    function powerDiagramSvg(f, id) {
-      const marker = `${id}-arrowhead`;
-      const solarList = f.solarList;
-      const solarInstancePower = f.solarInstancePower;
-      const solarInstanceCurrent = f.solarInstanceCurrent;
-      const chargerCurrent = f.chargerCurrent;
-      const solarLayout = solarBoxLayout(Math.max(1, solarList.length));
-      const solarNodesSvg = (solarList.length ? solarList : [null]).map((s, i) => {
-        const L = solarLayout[i];
-        const power = s ? solarInstancePower(s) : 0;
-        const current = s ? solarInstanceCurrent(s) : 0;
-        const label = solarList.length > 1 ? `SOLAR ${i + 1}` : 'SOLAR';
-        const startX = L.x + L.w, startY = L.y + L.h / 2;
-        return `
-          <rect x="${L.x}" y="${L.y}" width="${L.w}" height="${L.h}" fill="none" stroke="var(--brass)" stroke-width="2" rx="4"/>
-          <text x="${L.x + L.w / 2}" y="${L.y + L.h * 0.35}" class="power-label" fill="var(--text-primary)">${label}</text>
-          <text x="${L.x + L.w / 2}" y="${L.y + L.h * 0.85}" class="power-value" fill="var(--text-primary)">${power.toFixed(0)}W</text>
-          <path d="M ${startX} ${startY} Q 140 100 160 110" class="arrow-${current > 0 ? 'active arrow-flowing' : 'inactive'}" fill="none" marker-end="url(#${marker})"/>
-          <text x="${startX + 28}" y="${startY + 20}" class="power-value" fill="var(--text-primary)">${current.toFixed(1)}A</text>
-        `;
-      }).join('');
-
-      // The controller's load output: its own branch straight down from the
-      // solar box, deliberately never touching the LOAD circle -- these
-      // terminals bypass the boat's DC distribution entirely, and a line into
-      // LOAD would claim a connection that doesn't exist. Drawn only when a
-      // label is configured AND the controller actually publishes the figure.
-      const solarLoadWatts = f.solarLoadWatts;
-      const showSolarLoad = !!solarLoadLabel && typeof solarLoadWatts === 'number';
-      const lastSolarBox = solarLayout[solarLayout.length - 1];
-      // The label is free text, so the box sizes itself to it rather than
-      // inheriting the solar box's width: uppercase runs ~14 units per
-      // character at .power-label size (measured), and the solar box's 76
-      // would fit barely five. Growth is rightwards into empty diagram (the
-      // battery doesn't start until x=162) with the left edges kept flush,
-      // so the arrow slants slightly instead of the box drifting off-centre.
-      // Past the cap the label shrinks to fit rather than overflowing.
-      const loadLabelW = solarLoadLabel.length * 14;
-      const loadBoxW = Math.min(140, Math.max(lastSolarBox.w, loadLabelW + 14));
-      const loadBoxCx = lastSolarBox.x + loadBoxW / 2;
-      const loadLabelEm = (1.05 * Math.min(1, (loadBoxW - 12) / Math.max(1, loadLabelW))).toFixed(2);
-      const solarLoadSvg = !showSolarLoad ? '' : `
-          <path d="M ${lastSolarBox.x + lastSolarBox.w / 2} ${lastSolarBox.y + lastSolarBox.h} L ${loadBoxCx} 173"
-                class="arrow-${solarLoadWatts > 0 ? 'active arrow-flowing' : 'inactive'}" fill="none" marker-end="url(#${marker})"/>
-          <rect x="${lastSolarBox.x}" y="175" width="${loadBoxW}" height="50" rx="4"
-                fill="none" stroke="${solarLoadWatts > 0 ? 'var(--brass)' : 'var(--text-secondary)'}" stroke-width="2"/>
-          <text x="${loadBoxCx}" y="190" class="power-label" style="font-size:${loadLabelEm}em" fill="var(--text-primary)">${escapeHtml(solarLoadLabel)}</text>
-          <text x="${loadBoxCx}" y="218" class="power-value" fill="var(--text-primary)">${solarLoadWatts.toFixed(0)}W</text>
-      `;
-
-      // Arrowhead direction follows the path's own direction. Load is at
-      // cy=110 r=40 (bottom at 150); the battery's terminals top out at 215.
-      // Discharging (neg): arrow from battery to load. Charging (pos): the
-      // reverse.
-      const battArrowPath = f.battDischarging ? 'M 200 215 L 200 152' : 'M 200 152 L 200 213';
-      const battArrowClass = (f.battDischarging || f.battCharging) ? 'arrow-active arrow-flowing' : 'arrow-inactive';
-
-      return `
-        <svg viewBox="0 0 400 300" id="${id}" class="power-diagram">
-          <!-- Solar panel(s) (top left) -->
-          ${solarNodesSvg}
-
-          <!-- Controller load output (below the solar box, separate from LOAD) -->
-          ${solarLoadSvg}
-
-          <!-- Charger (top right) -->
-          <rect x="311" y="20" width="78" height="50" fill="none" stroke="${chargerCurrent > 0 ? 'var(--brass)' : 'var(--text-secondary)'}" stroke-width="2" rx="4"/>
-          <text x="350" y="35" class="power-label" fill="var(--text-primary)">CHARGER</text>
-          <text x="350" y="63" class="power-value" fill="var(--text-primary)">${Math.max(0, f.chargerPower).toFixed(0)}W</text>
-
-          <!-- Load (center -- the node solar and the charger both feed; no
-               wattage shown, it's not a measured value -- see comment above) -->
-          <circle cx="200" cy="110" r="40" fill="none" stroke="var(--brass)" stroke-width="3"/>
-          <text x="200" y="115" class="power-label" fill="var(--text-primary)">LOAD</text>
-
-          <!-- Battery (bottom -- makes up whatever solar+charger don't
-               cover). Drawn as a battery, body plus terminals, with the
-               state of charge inside it: the shape names the figure, so it
-               needs no BATTERY label of its own. -->
-          <g stroke="var(--brass)" stroke-width="2" fill="none">
-            <rect x="162" y="222" width="76" height="46" rx="4"/>
-            <rect x="178" y="215" width="11" height="7" rx="1.5"/>
-            <rect x="211" y="215" width="11" height="7" rx="1.5"/>
-          </g>
-          <text x="200" y="252" class="power-soc" fill="var(--text-primary)">${f.soc.toFixed(0)}%</text>
-
-          <!-- Arrow: Charger → Battery (Charge current) -->
-          <path d="M 311 45 Q 260 130 230 140" class="arrow-${chargerCurrent > 0 ? 'active arrow-flowing' : 'inactive'}" fill="none" marker-end="url(#${marker})"/>
-          ${chargerCurrent > 0 ? `<text x="280" y="85" class="power-value" fill="var(--text-primary)">Charge</text><text x="280" y="105" class="power-value" fill="var(--text-primary)">${chargerCurrent.toFixed(1)}A</text>` : ''}
-
-          <!-- Arrow: Charger → Load (shows charger supplies load power when active) -->
-          <path d="M 311 55 Q 270 80 240 100" class="arrow-${chargerCurrent > 0 ? 'active arrow-flowing' : 'inactive'}" fill="none" marker-end="url(#${marker})"/>
-          ${chargerCurrent > 0 ? `<text x="275" y="65" class="power-value" fill="var(--text-primary)">Load</text>` : ''}
-
-          <!-- Arrow: Battery ↔ Load -- direction flips with which way current is flowing -->
-          <path d="${battArrowPath}" class="${battArrowClass}" fill="none" marker-end="url(#${marker})"/>
-          <text x="215" y="190" class="power-value" fill="var(--text-primary)">${Math.abs(f.battCurrent).toFixed(1)}A</text>
-
-          <defs>
-            <marker id="${marker}" markerWidth="10" markerHeight="10" refX="9" refY="3" orient="auto">
-              <polygon points="0 0, 10 3, 0 6" fill="var(--brass)"/>
-            </marker>
-          </defs>
-        </svg>
-      `;
-    }
-
     // Writes html into mount, copying only changed text/attributes (keeps style attrs).
     function patchHtml(mount, html) {
       if (mount.__lastHtml === html) return 'unchanged';
@@ -2334,7 +2124,7 @@
       const onOverview = currentView === 'overview';
       powerStale = !onPower || !onOverview;
       if (!onPower && !onOverview) return;
-      const f = computePowerFigures(data.electrical);
+      const f = computePowerFigures(data.electrical, solarLoadLabel);
       const solarList = f.solarList;
       const chargerCurrent = f.chargerCurrent;
       const battCurrent = f.battCurrent;
@@ -2364,35 +2154,48 @@
       // device ("Victron SmartSolar Charger MPPT 75/15") -- the REST snapshot
       // has it and deltas only touch .value, so it sticks. Numbered when
       // there are several, since two identical models share a label.
-      const solarTitle = (s, i) => {
+      // Heading matches the diagram's SOLAR n box; the device name from Signal K's $source goes below it.
+      const solarHeading = (s, i) => {
         const field = Object.keys(s).map(k => s[k]).find(v => v && v.$source);
-        const num = solarList.length > 1 ? ` ${i + 1}` : '';
-        return field ? escapeHtml(field.$source) + num : `Solar${num} Details`;
+        const title = solarList.length > 1 ? `Solar ${i + 1}` : 'Solar';
+        return `<h4 style="margin-top: 20px; margin-bottom: 0; color: var(--text-primary);">${title}</h4>`
+          + (field ? `<div style="font-size: 0.85em; color: var(--text-secondary); margin-bottom: 6px;">${escapeHtml(field.$source)}</div>` : '');
       };
+      const row = (label, value) => `<div class="battery-row"><span>${label}</span><span style="color:var(--text-primary)">${value}</span></div>`;
+      const num = (field) => (field && typeof field.value === 'number' ? field.value : null);
+      // Victron BLE publishes no panel voltage or mode: voltage shows a dash, mode is omitted.
       const solarDetailsHtml = solarList.map((s, i) => {
         const kwh = solarYieldKwh(s);
+        const arrayV = num(s.panelVoltage);
+        const loadW = num(s.loadPower);
         return `
-        <h4 style="margin-top: 20px; color: var(--text-primary);">${solarTitle(s, i)}</h4>
-        <div class="battery-row"><span>Mode</span><span style="color:var(--text-primary)">${solarMode(s) ? escapeHtml(solarMode(s)) : '&mdash;'}</span></div>
-        <div class="battery-row"><span>Yield today</span><span style="color:var(--text-primary)">${kwh === null ? '&mdash;' : kwh.toFixed(2) + ' kWh'}</span></div>
+        ${solarHeading(s, i)}
+        ${solarMode(s) ? row('Mode', escapeHtml(solarMode(s))) : ''}
+        ${row('Panel voltage', arrayV === null ? '&mdash;' : `${arrayV.toFixed(1)} V`)}
+        ${row('Panel power', `${f.solarInstancePower(s).toFixed(0)} W`)}
+        ${loadW === null ? '' : row('Load output', `${loadW.toFixed(1)} W`)}
+        ${row('Yield today', kwh === null ? '&mdash;' : kwh.toFixed(2) + ' kWh')}
       `;
       }).join('');
-      const detailedHtml = diagram + (solarList.length ? `
+      const battDirection = f.battCharging ? 'Charging' : f.battDischarging ? 'Discharging' : 'Idle';
+      const detailsHtml = (solarList.length ? `
         ${solarDetailsHtml}
-        ${chargerCurrent > 0 ? `<h4 style="margin-top: 20px; color: var(--text-primary);">Charger</h4><div class="battery-row"><span>Current</span><span style="color:var(--text-primary)">${chargerCurrent.toFixed(2)} A</span></div>` : ''}
-        <h4 style="margin-top: 20px; color: var(--text-primary);">Battery Details</h4>
+        <h4 style="margin-top: 20px; margin-bottom: 0; color: var(--text-primary);">House Battery</h4>
+        <div style="font-size: 0.85em; color: var(--text-secondary); margin-bottom: 6px;">${battDirection}</div>
         <div class="battery-row"><span>Voltage</span><span style="color:var(--text-primary)">${battVoltage.toFixed(2)} V</span></div>
-        <div class="battery-row"><span>Current (+charging)</span><span style="color:var(--text-primary)">${signed(battCurrent, 2)} A</span></div>
-        <div class="battery-row"><span>Power (+charging)</span><span style="color:var(--text-primary)">${signed(battPower, 1)} W</span></div>
-        <div class="battery-row"><span>Discharge since full</span><span style="color:var(--text-primary)">${typeof dsf === 'number' ? signed(dsf, 2) + ' Ah' : '&mdash;'}</span></div>
-        <div class="battery-row"><span>Discharge since full (energy)</span><span style="color:var(--text-primary)">${typeof dsf === 'number' ? signed(dsf * battVoltage, 0) + ' Wh' : '&mdash;'}</span></div>
+        <div class="battery-row"><span>Current</span><span style="color:var(--text-primary)">${signed(battCurrent, 2)} A</span></div>
+        <div class="battery-row"><span>Power</span><span style="color:var(--text-primary)">${signed(battPower, 1)} W</span></div>
+        <div class="battery-row"><span>Consumed (charge)</span><span style="color:var(--text-primary)">${typeof dsf === 'number' ? dsf.toFixed(2) + ' Ah' : '&mdash;'}</span></div>
+        <div class="battery-row"><span>Consumed (energy)</span><span style="color:var(--text-primary)">${typeof dsf === 'number' ? (dsf * battVoltage).toFixed(0) + ' Wh' : '&mdash;'}</span></div>
         <div class="battery-row"><span>Time remaining</span><span style="color:var(--text-primary)">${f.hoursRemaining.toFixed(1)} h</span></div>
+        ${chargerCurrent > 0 ? `<h4 style="margin-top: 20px; margin-bottom: 0; color: var(--text-primary);">Charger / Alternator</h4><div style="font-size: 0.85em; color: var(--text-secondary); margin-bottom: 6px;">Estimated</div><div class="battery-row"><span>Current</span><span style="color:var(--text-primary)">${chargerCurrent.toFixed(2)} A</span></div>` : ''}
       ` : 'No solar charger data available');
+      const detailedHtml = `<div class="power-cols">${diagram}<div class="power-details">${detailsHtml}</div></div>`;
       // Both panes are detached from the document while Signal K is off
       // (syncGatedPanesDOM), so neither mount is guaranteed to exist.
       const solarMount = document.getElementById('power-solar');
       if (onPower && solarMount) {
-        patchHtml(solarMount, detailedHtml);
+        if (patchHtml(solarMount, detailedHtml) === 'replaced') syncActiveSwipeHeight(); // content height changed
         const batteryMount = document.getElementById('power-battery');
         if (batteryMount.firstChild) batteryMount.innerHTML = '';
       }
