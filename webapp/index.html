@@ -317,6 +317,18 @@
       color: var(--brass);
       font-weight: var(--heading-weight);
     }
+    /* All Controls, single pane: three equal columns. The tank panel floats over the top of the last
+       one (absolute, so its height never stretches the button rows); an empty ::before cell reserves
+       the space and the circuit buttons flow around it, top to bottom by column (display:contents joins them to the grid;
+       the row count comes from fitControlTankRows). */
+    @media (min-width: 620px) {
+      #view-control .control-layout { position: relative; min-height: 300px; display: grid; grid-template-columns: repeat(3, 1fr); grid-template-rows: repeat(var(--grid-rows, 7), auto); grid-auto-flow: column; gap: 0 12px; align-items: start; }
+      #view-control .control-layout::before { content: ''; grid-column: 3; grid-row: 1 / span var(--tank-rows, 7); }
+      #view-control #circuits { display: contents; }
+      #view-control button.circuit { max-width: none; font-size: 1.05em; padding: 8px 12px; margin: 4px 0; gap: 10px; }
+      #view-control .sensors-panel { position: absolute; top: -8px; right: 0; width: calc((100% - 24px) / 3); box-sizing: border-box; padding: 12px; }
+      #view-control .tank-cylinder-mount svg { max-width: 110px; }
+    }
     .sensors-panel h3 {
       margin: 0 0 12px;
       font-size: 1em;
@@ -426,11 +438,32 @@
 
   <div id="swipe-viewport" class="view active">
     <div id="swipe-track">
+      <section id="view-sensors" class="pane">
+        <h3>Tanks &amp; Batteries</h3>
+        <div class="gauge">
+          <div class="gauge-label">Freshwater</div>
+          <div class="tank-cylinder-mount" id="fresh-cyl-sn"></div>
+          <div class="gauge-value" id="sn-value-fresh">&mdash;</div>
+        </div>
+        <div class="gauge">
+          <div class="gauge-label">Blackwater</div>
+          <div class="gauge-bar"><div class="gauge-fill" id="sn-gauge-black" style="width:0%"></div></div>
+          <div class="gauge-value" id="sn-value-black">&mdash;</div>
+        </div>
+        <div class="battery-row"><span>Starter</span><span id="sn-value-starter">&mdash;</span></div>
+        <div class="battery-row"><span>House</span><span id="sn-value-house">&mdash;</span></div>
+      </section>
+
+      <section id="view-power" class="pane">
+        <div id="power-solar">loading&hellip;</div>
+        <div id="power-battery">loading&hellip;</div>
+      </section>
+
       <!-- Overview: boat side view (builder's drawing) with live lights, buttons, data and tanks. Gated behind Signal K. -->
       <section id="view-overview" class="pane">
         <div class="ov-wrap">
           <div id="ov-left">
-            <div id="ov-essentials"></div>
+            <div id="ov-buttons"></div>
             <div id="ov-data">
               <div class="data-row"><span>Battery SOC</span><span id="ov-data-soc">&mdash;</span></div>
               <div class="data-row"><span>Battery power</span><span id="ov-data-power">&mdash;</span></div>
@@ -611,34 +644,11 @@
         </div>
       </section>
 
-      <section id="view-essentials" class="pane">
-        <p id="essentials-state">state: loading&hellip;</p>
-        <div class="control-layout">
-          <div id="essentials-circuits">loading&hellip;</div>
-          <aside class="sensors-panel">
-            <h3>Tanks &amp; Batteries</h3>
-            <div class="gauge">
-              <div class="gauge-label">Freshwater</div>
-              <div class="tank-cylinder-mount" id="fresh-cyl-es"></div>
-              <div class="gauge-value" id="es-value-fresh">&mdash;</div>
-            </div>
-            <div class="gauge">
-              <div class="gauge-label">Blackwater</div>
-              <div class="gauge-bar"><div class="gauge-fill" id="es-gauge-black" style="width:0%"></div></div>
-              <div class="gauge-value" id="es-value-black">&mdash;</div>
-            </div>
-            <div class="battery-row"><span>Starter</span><span id="es-value-starter">&mdash;</span></div>
-            <div class="battery-row"><span>House</span><span id="es-value-house">&mdash;</span></div>
-          </aside>
-        </div>
-      </section>
-
       <section id="view-control" class="pane">
         <p id="state">state: loading&hellip;</p>
         <div class="control-layout">
           <div id="circuits">loading&hellip;</div>
           <aside class="sensors-panel">
-            <h3>Tanks &amp; Batteries</h3>
             <div class="gauge">
               <div class="gauge-label">Freshwater</div>
               <div class="tank-cylinder-mount" id="fresh-cyl-sb"></div>
@@ -653,27 +663,6 @@
             <div class="battery-row"><span>House</span><span id="sb-value-house">&mdash;</span></div>
           </aside>
         </div>
-      </section>
-
-      <section id="view-sensors" class="pane">
-        <h3>Tanks &amp; Batteries</h3>
-        <div class="gauge">
-          <div class="gauge-label">Freshwater</div>
-          <div class="tank-cylinder-mount" id="fresh-cyl-sn"></div>
-          <div class="gauge-value" id="sn-value-fresh">&mdash;</div>
-        </div>
-        <div class="gauge">
-          <div class="gauge-label">Blackwater</div>
-          <div class="gauge-bar"><div class="gauge-fill" id="sn-gauge-black" style="width:0%"></div></div>
-          <div class="gauge-value" id="sn-value-black">&mdash;</div>
-        </div>
-        <div class="battery-row"><span>Starter</span><span id="sn-value-starter">&mdash;</span></div>
-        <div class="battery-row"><span>House</span><span id="sn-value-house">&mdash;</span></div>
-      </section>
-
-      <section id="view-power" class="pane">
-        <div id="power-solar">loading&hellip;</div>
-        <div id="power-battery">loading&hellip;</div>
       </section>
 
       <section id="view-config" class="pane">
@@ -818,8 +807,8 @@
     }
     let signalkEnabled = !!loadCachedSignalkUrl();
 
-    const ALL_SWIPE_VIEWS = ['overview', 'essentials', 'control', 'sensors', 'power', 'config'];
-    const VIEW_LABELS = { overview: 'Overview', essentials: 'Essentials', control: 'All Controls', sensors: 'Sensors', power: 'Power', config: 'Settings' };
+    const ALL_SWIPE_VIEWS = ['sensors', 'power', 'overview', 'control', 'config'];
+    const VIEW_LABELS = { overview: 'Overview', control: 'All Controls', sensors: 'Sensors', power: 'Power', config: 'Settings' };
     // Pages with nothing to show without a Signal K source. Power's diagram
     // and Overview's copy of it both need electrical.solar/.batteries, and
     // Overview's cabin/fridge readings need environment.* -- none of which
@@ -862,6 +851,8 @@
     }
 
     let SWIPE_VIEWS = computeSwipeViews();
+    // Overview needs Signal K; All Controls works from the gateway alone.
+    function defaultView() { return SWIPE_VIEWS.includes('overview') ? 'overview' : 'control'; }
     syncGatedPanesDOM();
 
     // The Overview's masthead rises into the nav bar, which needs the bar's
@@ -880,10 +871,10 @@
     function updateSwipeViews() {
       SWIPE_VIEWS = computeSwipeViews();
       syncGatedPanesDOM();
-      const current = location.hash.slice(1) || 'essentials';
+      const current = location.hash.slice(1) || defaultView();
       // Only bump the hash if that page is on screen; at startup Signal K may not be enabled yet.
       if (SIGNALK_GATED.indexOf(current) !== -1 && !signalkEnabled && currentView === current) {
-        location.hash = 'essentials'; // hashchange -> showView; the page just vanished from under the viewer
+        location.hash = defaultView(); // hashchange -> showView; the page just vanished from under the viewer
       } else {
         showView(current);
       }
@@ -904,7 +895,7 @@
     // Re-measures the currently active pane -- for when its own content
     // changes size (e.g. the circuit list) without a navigation happening.
     function syncActiveSwipeHeight() {
-      const idx = SWIPE_VIEWS.indexOf(mainViewFor(location.hash.slice(1) || 'essentials'));
+      const idx = SWIPE_VIEWS.indexOf(mainViewFor(location.hash.slice(1) || defaultView()));
       if (idx !== -1) syncSwipeHeight(idx);
     }
 
@@ -912,7 +903,7 @@
     // pane for the main pages, or the sub-view's own section otherwise.
     // Used to scope Up/Down button navigation (below) to what's visible.
     function currentPageRoot() {
-      const name = location.hash.slice(1) || 'essentials';
+      const name = location.hash.slice(1) || defaultView();
       return SWIPE_VIEWS.includes(name)
         ? swipeTrack.children[SWIPE_VIEWS.indexOf(name)]
         : document.getElementById(`view-${name}`);
@@ -953,7 +944,6 @@
     // shows the gauge too.
     const TANK_GAUGE_MOUNTS = {
       overview: 'fresh-cyl-ov',
-      essentials: 'fresh-cyl-es',
       control: 'fresh-cyl-sb',
       sensors: 'fresh-cyl-sn',
       'tank-settings': 'fresh-cyl-ts',
@@ -963,15 +953,26 @@
     // MFD/preview simulator rebuilding the app's view on a pane-layout
     // change reloads it with no hash -- confirmed via the access log, not
     // just a resize) restores where you were instead of always dropping
-    // back to Essentials. Only consulted for a genuinely hash-less load
+    // back to the default page. Only consulted for a genuinely hash-less load
     // (see the initial showView() call below) -- never overrides an
     // explicit hash already in the URL.
     const LAST_VIEW_KEY = 'vbp.lastView';
     function rememberView(name) {
       try { localStorage.setItem(LAST_VIEW_KEY, name); } catch (err) { /* best-effort */ }
     }
+    // Only a reload restores the tab (the stamp is written as the page unloads); a start
+    // after a longer gap lands on the default page.
+    const LAST_SEEN_KEY = 'vbp.lastSeen';
+    const RESTORE_WINDOW_MS = 15000;
+    function stampLastSeen() {
+      try { localStorage.setItem(LAST_SEEN_KEY, String(Date.now())); } catch (err) { /* best-effort */ }
+    }
+    window.addEventListener('pagehide', stampLastSeen);
     function loadRememberedView() {
-      try { return localStorage.getItem(LAST_VIEW_KEY) || ''; } catch (err) { return ''; }
+      try {
+        if (Date.now() - Number(localStorage.getItem(LAST_SEEN_KEY)) > RESTORE_WINDOW_MS) return '';
+        return localStorage.getItem(LAST_VIEW_KEY) || '';
+      } catch (err) { return ''; }
     }
     // A remembered main-page name might not be valid right now even though
     // it once was -- e.g. "power" while Signal K is currently disabled, in
@@ -981,10 +982,10 @@
     function isValidView(name) {
       if (SWIPE_VIEWS.includes(name)) return true;
       if (ALL_SWIPE_VIEWS.includes(name)) return false;
-      return true;
+      return !!document.getElementById(`view-${name}`); // unknown names, e.g. a stale #essentials
     }
 
-    let currentView = 'essentials';
+    let currentView = 'control';
     // Set when renderPower() skipped an off-screen diagram; showView() redraws it.
     let powerStale = false;
     let controlStale = false; // relay widgets on hidden pages need a redraw
@@ -997,7 +998,7 @@
       // otherwise hit getElementById(...) === null below and take the whole
       // script down with it. Fall back until it becomes available; the later
       // updateSwipeViews() re-runs showView() with the hash still intact.
-      if (!isValidView(name)) name = 'essentials';
+      if (!isValidView(name)) name = defaultView();
       currentView = name;
       rememberView(name);
       if (TANK_GAUGE_MOUNTS[name]) moveTankGaugeTo(TANK_GAUGE_MOUNTS[name]);
@@ -1009,6 +1010,7 @@
       if (powerStale && (name === 'power' || name === 'overview')) renderPower(lastElectrical);
       if (controlStale) renderControl(lastStatus);
       if (name === 'overview') syncOverviewLayout();
+      if (name === 'control') fitControlTankRows();
       const isMain = SWIPE_VIEWS.includes(name);
       const wasMainActive = swipeViewport.classList.contains('active');
       document.querySelectorAll('.view').forEach(el => el.classList.remove('active'));
@@ -1029,7 +1031,7 @@
     // SWIPE_VIEWS order, clamped at the ends (no wraparound). From a
     // sub-view this steps relative to Settings (see mainViewFor()).
     function stepView(delta) {
-      const idx = SWIPE_VIEWS.indexOf(mainViewFor(location.hash.slice(1) || 'essentials'));
+      const idx = SWIPE_VIEWS.indexOf(mainViewFor(location.hash.slice(1) || defaultView()));
       const next = idx + delta;
       if (next < 0 || next >= SWIPE_VIEWS.length) return;
       location.hash = SWIPE_VIEWS[next];
@@ -1038,7 +1040,7 @@
     navNext.addEventListener('click', () => stepView(1));
 
     window.addEventListener('hashchange', () => {
-      showView(location.hash.slice(1) || 'essentials');
+      showView(location.hash.slice(1) || defaultView());
     });
     // The initial showView() call happens after initTankCylinder(), further
     // down -- showView() moves tankGaugeEl into place immediately, so it
@@ -1049,9 +1051,30 @@
     // autopilot pane -- which changes the active pane's height without any
     // of our render functions running, so the swipe track needs its own
     // resync hook here.
+    // All Controls (single pane): reserve exactly as many grid rows beside the buttons as the floating
+    // tank panel is tall, so no button ends up under it. Needs the panel and a button laid out.
+    function fitControlTankRows() {
+      const layout = document.querySelector('#view-control .control-layout');
+      const panel = layout && layout.querySelector('.sensors-panel');
+      const btn = layout && layout.querySelector('button.circuit');
+      if (!panel || !btn || !panel.offsetHeight) return;
+      const cs = getComputedStyle(btn);
+      const pitch = btn.offsetHeight + parseFloat(cs.marginTop) + parseFloat(cs.marginBottom);
+      const rows = Math.max(1, Math.ceil((panel.offsetHeight - 8 + 4) / pitch)); // panel sits 8px above the layout; 4px slack
+      // Buttons fill top to bottom, column by column, so the grid needs its row count: enough for
+      // all buttons plus the cells the tank panel takes in the last column.
+      const gridRows = Math.max(rows, Math.ceil((layout.querySelectorAll('button.circuit').length + rows) / 3));
+      if (layout.style.getPropertyValue('--tank-rows') !== String(rows) || layout.style.getPropertyValue('--grid-rows') !== String(gridRows)) {
+        layout.style.setProperty('--tank-rows', rows);
+        layout.style.setProperty('--grid-rows', gridRows);
+        syncActiveSwipeHeight();
+      }
+    }
+
     function resyncLayout() {
       syncNavHeight();
       syncOverviewLayout();
+      fitControlTankRows();
       syncActiveSwipeHeight();
     }
     window.addEventListener('resize', resyncLayout);
@@ -1083,7 +1106,8 @@
       // Keep the height-dimension line clear of the nav's right arrow.
       let marginRight = 0;
       if (!stacked) {
-        const gapRight = document.documentElement.clientWidth - wrap.getBoundingClientRect().right;
+        // Relative to the pane, not the screen: the track may still be mid-slide (or not yet moved) here.
+        const gapRight = wrap.closest('.pane').getBoundingClientRect().right - wrap.getBoundingClientRect().right;
         marginRight = Math.max(0, Math.ceil(navNext.offsetWidth + 6 - gapRight - (BOAT_VB_RIGHT - BOAT_DIM_X) * w / BOAT_VB_W));
       }
       box.style.marginRight = `${marginRight}px`;
@@ -1094,7 +1118,7 @@
     // level with the first button. Stacked: at the left edge.
     function placeOverviewTanks(box, wrap, w, stacked) {
       const overlay = box.querySelector('.ov-tanks');
-      const buttons = document.getElementById('ov-essentials');
+      const buttons = document.getElementById('ov-buttons');
       const boatRect = box.getBoundingClientRect();
       const buttonsRight = buttons.getBoundingClientRect().right;
       let left = wrap.getBoundingClientRect().left;
@@ -1432,7 +1456,7 @@
     }
 
     // A hash-less load restores whichever tab was last remembered, rather
-    // than always dropping to Essentials -- only when there's no explicit
+    // than always dropping to the default page -- only when there's no explicit
     // hash already in the URL, so a real deep-link/back-navigation is never
     // overridden. Setting location.hash here (before the showView() call
     // below reads it) is enough -- no separate branch needed.
@@ -1443,7 +1467,7 @@
 
     // tankGaugeEl must exist before showView() can move it into place.
     initTankCylinder();
-    showView(location.hash.slice(1) || 'essentials');
+    showView(location.hash.slice(1) || defaultView());
 
     // Seed the local cache from the server before the first render, so a
     // fresh browser/device (or one whose localStorage got cleared) picks up
@@ -1588,7 +1612,7 @@
       });
     }
 
-    // Control's/Essentials' #state lines only show when there's something
+    // Control's #state line only shows when there's something
     // to flag — otherwise it's just the circuit buttons. Diagnostics
     // always shows full status, since that's the point of that tab.
     function setStateLine(elId, text) {
@@ -1614,15 +1638,14 @@
       return btn;
     }
 
-    // Essentials: a small curated/relabeled subset, not tied to Config's
+    // Overview's buttons: a small curated/relabeled subset, not tied to Config's
     // per-circuit visibility (that only governs the All Controls tab).
-    // Overview's buttons: Essentials' five plus Compass light.
     const OVERVIEW_BUTTONS = [
       ['Anchor light', 'LANTERN_MASTHEAD'], ['Steaming light', 'LANTERN_STEAM'], ['Deck light', 'DECK_LIGHT'],
       ['Cockpit outlet', 'F5'], ['Compass light', 'COMPASS_LIGHT'],
     ];
     function renderOverviewButtons(status) {
-      const container = document.getElementById('ov-essentials');
+      const container = document.getElementById('ov-buttons');
       if (!container) return;
       const c = status.electrical.switches;
       const navOn = c.LANTERN_BOW.state && c.LANTERN_AFT.state;
@@ -1635,24 +1658,11 @@
       if (firstRender) syncOverviewLayout(); // the tank panel aligns with the first button
     }
 
-    function renderEssentials(status) {
-      const c = status.electrical.switches;
-      const container = document.getElementById('essentials-circuits');
-      container.innerHTML = '';
-
-      const navLightsOn = c.LANTERN_BOW.state && c.LANTERN_AFT.state;
-      container.appendChild(makeCircuitButton('Navigation lights', navLightsOn, () => setNavigationLights(!navLightsOn)));
-      container.appendChild(makeCircuitButton('Anchor light', c.LANTERN_MASTHEAD.state, () => setCircuit('LANTERN_MASTHEAD', !c.LANTERN_MASTHEAD.state)));
-      container.appendChild(makeCircuitButton('Steaming light', c.LANTERN_STEAM.state, () => setCircuit('LANTERN_STEAM', !c.LANTERN_STEAM.state)));
-      container.appendChild(makeCircuitButton('Deck light', c.DECK_LIGHT.state, () => setCircuit('DECK_LIGHT', !c.DECK_LIGHT.state)));
-      container.appendChild(makeCircuitButton('Cockpit outlet', c.F5.state, () => setCircuit('F5', !c.F5.state)));
-    }
-
-    // -- Overview lights: the same circuits Essentials drives, operated from
+    // -- Overview lights: the same circuits the Overview buttons drive, operated from
     // the boat plan instead of buttons. State always comes from /status,
     // never from a local toggle, so a press on the boat's own panel keeps
     // the picture honest. Bow and stern are one group, exactly as
-    // Essentials' "Navigation lights" button treats them (setNavigationLights).
+    // the Overview's "Navigation lights" button treats them (setNavigationLights).
     const OVERVIEW_LIGHTS = [
       { key: 'anchor', circuits: ['LANTERN_MASTHEAD'], dim: '#4A4A3E' },
       { key: 'steam', circuits: ['LANTERN_STEAM'], dim: '#4A4A3E' },
@@ -1705,8 +1715,6 @@
       if (currentView === 'overview') {
         renderOverviewLights(status);
         renderOverviewButtons(status);
-      } else if (currentView === 'essentials') {
-        renderEssentials(status);
       } else if (currentView === 'control') {
         const container = document.getElementById('circuits');
         container.innerHTML = '';
@@ -1715,6 +1723,7 @@
           const on = sw.state;
           container.appendChild(makeCircuitButton(name, on, () => setCircuit(name, !on)));
         }
+        fitControlTankRows();
       }
       syncActiveSwipeHeight(); // the rebuilt buttons can change the visible pane's height
       controlStale = true;
@@ -1722,7 +1731,6 @@
       const summary = `state: ${status.state} | streaming: ${status.streaming}`;
       const hasIssue = status.state !== 'OPERATIONAL' || !status.streaming;
       setStateLine('state', hasIssue ? summary : '');
-      setStateLine('essentials-state', hasIssue ? summary : '');
       const circuitsSummary = Object.entries(status.electrical.switches)
         .map(([name, sw]) => `${name}: ${sw.state ? 'ON' : 'OFF'}`).join(', ');
       document.getElementById('diag-status').textContent = `${summary} — ${circuitsSummary}`;
@@ -2003,7 +2011,7 @@
     // Every page with a tank gauge also has its own freshwater/blackwater
     // text+bar elements under this id prefix (cheap plain divs, unlike the
     // <svg> above -- no benefit to sharing those across pages too).
-    const TANK_TEXT_ID_PREFIXES = ['sb-', 'es-', 'sn-', 'tv-', 'ov-'];
+    const TANK_TEXT_ID_PREFIXES = ['sb-', 'sn-', 'tv-', 'ov-'];
 
     // A tank's full capacity, from the 100% row of the calibration table --
     // the same source tankLiters() reads. Falls back to "100%" when that
@@ -2054,7 +2062,6 @@
       const starterVoltage = data.electrical.batteries.starter.voltage;
       const houseVoltage = data.electrical.batteries.house.voltage;
       updateBatteryRow('sb-', starterVoltage, houseVoltage);
-      updateBatteryRow('es-', starterVoltage, houseVoltage);
       updateBatteryRow('sn-', starterVoltage, houseVoltage);
       // Sensor calibration page shows the same live voltage as reference
       // while you're about to type in a multimeter reading next to it.
@@ -2367,11 +2374,9 @@
           renderControl(await resp.json());
         } else {
           setStateLine('state', `state: error ${resp.status}`);
-          setStateLine('essentials-state', `state: error ${resp.status}`);
         }
       } catch (err) {
         setStateLine('state', 'state: unreachable');
-        setStateLine('essentials-state', 'state: unreachable');
       }
     }
 
@@ -2497,7 +2502,6 @@
       ws.onerror = () => ws.close(); // onclose below handles the actual reconnect
       ws.onclose = () => {
         setStateLine('state', 'state: unreachable');
-        setStateLine('essentials-state', 'state: unreachable');
         setTimeout(connectSubscribe, RECONNECT_MS);
       };
     }
