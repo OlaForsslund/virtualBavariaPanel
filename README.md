@@ -9,6 +9,18 @@ It takes over control of the relay board to let a web app control the relays, su
 controll them via the existing physical panel. Unfortunatly, the pysical pannel will not indicate updated relay status. Turning the gateway off 
 hands control back to the panel alone. See `architecture.md` for the full design.
 
+## Screenshots
+
+Running as an app on a B&G Zeus3 7 chartplotter (swipe or use the arrows to change page):
+
+![Overview](docs/screenshots/vbp-overview.png)
+
+| All Controls | Power |
+|---|---|
+| ![All Controls](docs/screenshots/vbp-control.png) | ![Power](docs/screenshots/vbp-power.png) |
+| **Sensors** | **Settings** |
+| ![Sensors](docs/screenshots/vbp-sensors.png) | ![Settings](docs/screenshots/vbp-settings.png) |
+
 ## What you need
 
 - Linux computer, e.g. Raspberry Pi with a CAN interface wired inline on the panel/relay-board
