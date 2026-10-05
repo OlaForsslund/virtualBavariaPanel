@@ -2170,7 +2170,7 @@
       };
       const row = (label, value) => `<div class="battery-row"><span>${label}</span><span style="color:var(--text-primary)">${value}</span></div>`;
       const num = (field) => (field && typeof field.value === 'number' ? field.value : null);
-      // Victron BLE publishes no panel voltage or mode: voltage shows a dash, mode is omitted.
+      // Victron BLE publishes no panel voltage or mode: both rows are omitted when absent.
       const solarDetailsHtml = solarList.map((s, i) => {
         const kwh = solarYieldKwh(s);
         const arrayV = num(s.panelVoltage);
@@ -2178,7 +2178,7 @@
         return `
         ${solarHeading(s, i)}
         ${solarMode(s) ? row('Mode', escapeHtml(solarMode(s))) : ''}
-        ${row('Panel voltage', arrayV === null ? '&mdash;' : `${arrayV.toFixed(1)} V`)}
+        ${arrayV === null ? '' : row('Panel voltage', `${arrayV.toFixed(1)} V`)}
         ${row('Panel power', `${f.solarInstancePower(s).toFixed(0)} W`)}
         ${loadW === null ? '' : row('Load output', `${loadW.toFixed(1)} W`)}
         ${row('Yield today', kwh === null ? '&mdash;' : kwh.toFixed(2) + ' kWh')}
