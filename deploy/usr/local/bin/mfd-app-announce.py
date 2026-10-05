@@ -10,7 +10,7 @@ APP_PORT = 80
 APP_PATH = "/"
 APP_NAME = "Bavaria Panel"
 APP_DESC = "Virtual Bavaria Panel"
-ICON_PATH = "/android-chrome-192x192.png"
+ICON_PATH = "/navico-tile.png"
 SOURCE_ID = "nauticore"
 
 

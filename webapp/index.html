@@ -6,10 +6,15 @@
   // MFD adds mfd_name etc. to the URL; html.mfd enables plotter-only CSS (?mfd forces it).
   if (/[?&](mfd_name=|mfd(&|$))/.test(location.search)) document.documentElement.classList.add('mfd');
 
+  // Shell cache for phones only; the MFD is CPU-bound, not network-bound.
   if ('serviceWorker' in navigator) {
-    navigator.serviceWorker.register('/sw.js')
-      .then(() => console.log('Service Worker registered'))
-      .catch(err => console.error('Service Worker failed', err));
+    if (document.documentElement.classList.contains('mfd')) {
+      navigator.serviceWorker.getRegistrations().then(rs => rs.forEach(r => r.unregister()));
+    } else {
+      navigator.serviceWorker.register('/sw.js')
+        .then(() => console.log('Service Worker registered'))
+        .catch(err => console.error('Service Worker failed', err));
+    }
   }
 
   // -- day/night theme: resolved and applied here, before <head>/CSS even
@@ -174,6 +179,8 @@
       cursor: pointer;
     }
     .nav-arrow:disabled { opacity: 0.3; cursor: default; }
+    .nav-fs { flex-basis: 44px; }
+    .nav-fs[hidden] { display: none; }
     /* Worst case per mfd_display_notes-zeus3-7.md: ~318px, quarter split,
        autopilot expanded. */
     @media (max-width: 360px) {
@@ -394,7 +401,6 @@
 
     /* -- Overview page: the mast rises into the nav (viewport extended behind it). */
     body.overview-active nav { position: relative; z-index: 1; border-bottom-color: transparent; }
-    body.overview-active #nav-label { background: transparent; }
     body.overview-active #swipe-viewport {
       position: relative;
       z-index: 2;
@@ -432,6 +438,7 @@
 <body>
   <nav>
     <button id="nav-prev" class="nav-arrow" type="button" aria-label="Previous page">&laquo;</button>
+    <button id="nav-fs" class="nav-arrow nav-fs" type="button" aria-label="Full screen" hidden><svg viewBox="0 0 24 24" width="22" height="22" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round"><path d="M4 9V4h5M20 9V4h-5M4 15v5h5M20 15v5h-5"/></svg></button>
     <span id="nav-label"></span>
     <button id="nav-next" class="nav-arrow" type="button" aria-label="Next page">&raquo;</button>
   </nav>
@@ -1232,6 +1239,16 @@
       updateThemeButton();
     }
     updateThemeButton();
+
+    // -- fullscreen button (next to the left arrow): plain-http PWAs keep the browser bars. Not on the MFD.
+    const fsBtn = document.getElementById('nav-fs');
+    if (document.documentElement.requestFullscreen && !document.documentElement.classList.contains('mfd')) {
+      fsBtn.hidden = false;
+      fsBtn.addEventListener('click', function () {
+        if (document.fullscreenElement) document.exitFullscreen();
+        else document.documentElement.requestFullscreen().catch(function () {});
+      });
+    }
 
     // -- config: which circuits are visible on Control, persisted server-side
     // (GET/PUT /config) with localStorage as an instant local cache so

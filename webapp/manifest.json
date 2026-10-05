@@ -1,9 +1,10 @@
 {
   "name": "Virtual Bavaria Panel",
-  "short_name": "Bavaria Panel",
+  "short_name": "Virtual Bavaria Panel",
   "description": "Virtual Bavaria Panel relay control",
   "start_url": "/",
   "display": "standalone",
+  "display_override": ["fullscreen", "standalone"],
   "background_color": "#1f2535",
   "theme_color": "#1f2535",
   "icons": [
@@ -28,10 +29,16 @@
       "type": "image/png"
     },
     {
+      "src": "android-chrome-maskable-512x512.png",
+      "sizes": "512x512",
+      "type": "image/png",
+      "purpose": "maskable"
+    },
+    {
       "src": "apple-touch-icon.png",
       "sizes": "180x180",
       "type": "image/png",
-      "purpose": "any maskable"
+      "purpose": "any"
     },
     {
       "src": "mstile-150x150.png",

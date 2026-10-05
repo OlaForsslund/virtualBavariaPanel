@@ -43,7 +43,7 @@ APP_PORT = 80
 APP_PATH = "/"
 APP_NAME = "Bavaria Panel"
 APP_DESC = "Virtual Bavaria Panel"
-ICON_PATH = "/android-chrome-192x192.png"
+ICON_PATH = "/navico-tile.png"
 SOURCE_ID = "nauticore"
 ```
 
@@ -96,4 +96,4 @@ sudo journalctl -u mfd-app-announce -f       # tail logs
 - If VBP's IP changes (new DHCP lease), the announcer picks it up automatically
   on the next 10s cycle — no restart needed.
 - The icon must exist and be reachable at `http://<vbp-ip>:80/<ICON_PATH>`.
-  The webapp serves icons from its `webapp/` directory (e.g. `webapp/android-chrome-192x192.png`).
+  The webapp serves icons from its `webapp/` directory (e.g. `webapp/navico-tile.png`).
