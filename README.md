@@ -25,7 +25,7 @@ Running as an app on a B&G Zeus3 7 chartplotter:
 |---|---|
 | ![All Controls](docs/screenshots/vbp-control.png) <br>All data from panel/switchboard, you can select what buttons to show in settings 'Circuit visibility'. | ![Power](docs/screenshots/vbp-power.png) <br>Optional page if you have Signal K. All data populated via bt-sensors-plugin-sk. |
 | **Sensors** | **Settings** |
-| ![Sensors](docs/screenshots/vbp-sensors.png) <br>Tank and voltage sensors read from the Bavaria panel. | ![Settings](docs/screenshots/vbp-settings.png) |
+| ![Sensors](docs/screenshots/vbp-sensors.png) <br>Tank and voltage sensors read from the Bavaria panel. | ![Settings](docs/screenshots/vbp-settings.png) Customizable to fit your setup.|
 
 ## What you need
 
