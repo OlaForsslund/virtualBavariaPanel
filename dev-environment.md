@@ -28,6 +28,10 @@
 
 /webapp
 
+/design             <- source artwork + generators; not deployed (webapp/ is)
+  /artwork            <- boat SVG exports (Illustrator)
+  make_icons.py       <- renders the webapp icons from it (icons.md)
+
 /simulators
   panel_sim.py
   relay_sim.py

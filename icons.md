@@ -1,5 +1,11 @@
 # Icons
 
+Generated, not hand-edited: `pip install cairosvg pillow`, then
+`python design/make_icons.py` rewrites the PNGs below from
+`design/artwork/Bavaria34/Cruiser 34 sida2-sails.svg` (Illustrator export of the sailed boat).
+Transparent, hull edge to edge, rig cropped at the top; 16/32 px show the whole boat.
+`apple-touch-icon.png` is opaque (`#1f2535`) with a margin: it is `maskable`, and iOS blackens transparency.
+
 | File | Size | Used for |
 |---|---|---|
 | `webapp/favicon-16x16.png` | 16×16 | Browser tab favicon
